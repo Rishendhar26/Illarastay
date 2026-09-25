@@ -24,6 +24,33 @@ create table public.users (
   updated_at timestamptz not null default now()
 );
 
+-- Create the public profile that the Flutter auth repository expects after a
+-- Supabase Auth signup. Admin accounts must be promoted separately by an
+-- existing administrator; client metadata can only create tenant/owner rows.
+create or replace function public.handle_new_auth_user() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare
+  requested_role public.user_role;
+begin
+  requested_role := case
+    when new.raw_user_meta_data ->> 'role' = 'owner' then 'owner'::public.user_role
+    else 'tenant'::public.user_role
+  end;
+  insert into public.users (id, name, email, role)
+  values (
+    new.id,
+    coalesce(new.raw_user_meta_data ->> 'name', split_part(new.email, '@', 1)),
+    new.email,
+    requested_role
+  )
+  on conflict (id) do update set email = excluded.email, updated_at = now();
+  return new;
+end;
+$$;
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute function public.handle_new_auth_user();
+
 create table public.properties (
   id uuid primary key default gen_random_uuid(),
   owner_id uuid not null references public.users(id) on delete cascade,
@@ -129,6 +156,19 @@ create index requests_tenant_idx on public.requests (tenant_id, created_at desc)
 create index requests_owner_idx on public.requests (owner_id, status, created_at desc);
 create index reports_status_idx on public.reports (status, created_at desc);
 create index reviews_status_idx on public.reviews (status, created_at desc);
+
+create or replace function public.set_updated_at() returns trigger
+language plpgsql as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$;
+create trigger users_set_updated_at before update on public.users for each row execute function public.set_updated_at();
+create trigger properties_set_updated_at before update on public.properties for each row execute function public.set_updated_at();
+create trigger requests_set_updated_at before update on public.requests for each row execute function public.set_updated_at();
+create trigger reviews_set_updated_at before update on public.reviews for each row execute function public.set_updated_at();
+create trigger reports_set_updated_at before update on public.reports for each row execute function public.set_updated_at();
 
 create or replace function public.is_admin() returns boolean language sql stable security definer set search_path = public as $$
   select exists (select 1 from public.users where id = auth.uid() and role = 'admin' and status = 'active');

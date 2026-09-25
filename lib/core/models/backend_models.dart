@@ -152,6 +152,9 @@ class RequestRecord {
     required this.ownerId,
     required this.requestType,
     required this.status,
+    this.message = '',
+    this.preferredDate,
+    this.preferredTime,
   });
 
   final String id;
@@ -159,5 +162,8 @@ class RequestRecord {
   final String tenantId;
   final String ownerId;
   final String requestType;
+  final String message;
+  final DateTime? preferredDate;
+  final String? preferredTime;
   final BackendRequestStatus status;
 }

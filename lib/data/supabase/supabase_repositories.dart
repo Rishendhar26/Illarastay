@@ -281,6 +281,9 @@ class SupabaseRequestRepository extends _SupabaseRepository
               'tenant_id': request.tenantId,
               'owner_id': request.ownerId,
               'request_type': request.requestType,
+              'message': request.message,
+              'preferred_date': request.preferredDate?.toIso8601String(),
+              'preferred_time': request.preferredTime,
               'status': request.status.name,
             })
             .select()
@@ -307,8 +310,14 @@ class SupabaseRequestRepository extends _SupabaseRepository
         tenantId: row['tenant_id'] as String,
         ownerId: row['owner_id'] as String,
         requestType: row['request_type'] as String,
+        message: row['message'] as String? ?? '',
+        preferredDate: _date(row['preferred_date']),
+        preferredTime: row['preferred_time'] as String?,
         status: BackendRequestStatus.values.byName(row['status'] as String),
       );
+
+  DateTime? _date(Object? value) =>
+      value is String ? DateTime.tryParse(value) : null;
 }
 
 class SupabaseSavedPropertyRepository extends _SupabaseRepository

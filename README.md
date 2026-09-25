@@ -36,6 +36,10 @@ Supabase/PostgreSQL is the planned production backend. The initial schema and le
 
 Marketplace visibility is intentionally modeled as two independent states: a property must be `approval_status = approved` and `status = published` before tenants can see it. Owners can manage their own records; admins moderate approvals, users, reviews, reports, and amenities.
 
+## Next Supabase step
+
+For a fresh IllaraStay Supabase project, open the Supabase SQL Editor, paste the complete contents of [`supabase/migrations/001_initial_schema.sql`](supabase/migrations/001_initial_schema.sql), and run it once. This single deployment file creates the tables, constraints, indexes, timestamps, auth-profile trigger, approval guard, and RLS policies required by the current app. It contains no database password, service-role key, private key, or other credential.
+
 ## Supabase configuration
 
 Copy [`.env.example`](.env.example) to `.env` for local reference. Do not commit `.env`, real credentials, passwords, or service-role keys. Flutter receives the project URL and publishable key at build/run time without storing the key in source:
