@@ -3,6 +3,8 @@
         "command": true,
         "true": true,
         "uname": true,
-        "git fetch": true
+        "git fetch": true,
+        "/tmp/flutter/bin/dart": true,
+        "/tmp/flutter/bin/flutter": true
     }
 }

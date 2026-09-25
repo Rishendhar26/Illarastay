@@ -8,7 +8,9 @@ enum PropertyType { pg, room, flat, house, villa, residentialLand, commercial }
 
 enum ListingType { rent, sale }
 
-enum RequestStatus { pending, accepted, rejected }
+enum Furnishing { unfurnished, semiFurnished, fullyFurnished }
+
+enum RequestStatus { pending, accepted, rejected, completed }
 
 extension PropertyTypeName on PropertyType {
   String get label => switch (this) {
@@ -26,6 +28,14 @@ extension RequestStatusName on RequestStatus {
   String get label => name[0].toUpperCase() + name.substring(1);
 }
 
+extension FurnishingName on Furnishing {
+  String get label => switch (this) {
+        Furnishing.unfurnished => 'Unfurnished',
+        Furnishing.semiFurnished => 'Semi-furnished',
+        Furnishing.fullyFurnished => 'Fully furnished',
+      };
+}
+
 class Property {
   const Property(
       {required this.id,
@@ -41,21 +51,36 @@ class Property {
       required this.color,
       this.listingType = ListingType.rent,
       this.bedrooms = 0,
-      this.bathrooms = 0});
+      this.bathrooms = 0,
+      this.deposit = 0,
+      this.maintenance = 0,
+      this.furnishing = Furnishing.unfurnished,
+      this.floor = 0,
+      this.totalFloors = 0,
+      this.availability = 'Available now',
+      this.address = 'Address shared after a visit is requested'});
   final String id, title, city, locality, description, owner;
+  final String availability, address;
   final PropertyType type;
   final ListingType listingType;
-  final double price;
-  final int area, bedrooms, bathrooms;
+  final double price, deposit, maintenance;
+  final int area, bedrooms, bathrooms, floor, totalFloors;
+  final Furnishing furnishing;
   final List<String> amenities;
   final Color color;
 }
 
 class PropertyRequest {
   PropertyRequest(this.id, this.property,
-      {this.status = RequestStatus.pending});
+      {this.status = RequestStatus.pending,
+      this.preferredDate,
+      this.preferredTime,
+      this.message = ''});
   final String id;
   final Property property;
+  final DateTime? preferredDate;
+  final TimeOfDay? preferredTime;
+  final String message;
   RequestStatus status;
 }
 
@@ -65,7 +90,8 @@ abstract class PropertyRepository {
   List<PropertyRequest> requests();
   bool saved(String id);
   void toggleSaved(String id);
-  void requestVisit(Property property);
+  void requestVisit(Property property,
+      {DateTime? preferredDate, TimeOfDay? preferredTime, String message = ''});
   void updateRequest(String id, RequestStatus status);
 }
 
@@ -82,8 +108,15 @@ class MockPropertyRepository implements PropertyRepository {
   void toggleSaved(String id) =>
       savedIds.contains(id) ? savedIds.remove(id) : savedIds.add(id);
   @override
-  void requestVisit(Property property) => visitRequests
-      .add(PropertyRequest('r${visitRequests.length + 1}', property));
+  void requestVisit(Property property,
+          {DateTime? preferredDate,
+          TimeOfDay? preferredTime,
+          String message = ''}) =>
+      visitRequests.add(PropertyRequest(
+          'r${visitRequests.length + 1}', property,
+          preferredDate: preferredDate,
+          preferredTime: preferredTime,
+          message: message));
   @override
   void updateRequest(String id, RequestStatus status) {
     for (final item in visitRequests) {
@@ -103,6 +136,12 @@ final mockProperties = <Property>[
       area: 1180,
       bedrooms: 2,
       bathrooms: 2,
+      deposit: 64000,
+      maintenance: 2800,
+      furnishing: Furnishing.semiFurnished,
+      floor: 3,
+      totalFloors: 5,
+      availability: 'Available from 15 Oct 2026',
       description:
           'A calm, thoughtfully planned home close to cafes and transit.',
       amenities: ['Lift', 'Power backup', 'Parking'],
@@ -118,6 +157,12 @@ final mockProperties = <Property>[
       area: 240,
       bedrooms: 1,
       bathrooms: 1,
+      deposit: 29000,
+      maintenance: 1200,
+      furnishing: Furnishing.fullyFurnished,
+      floor: 2,
+      totalFloors: 4,
+      availability: 'Available now',
       description:
           'A private room in a well-managed shared home for professionals.',
       amenities: ['Wi-Fi', 'Housekeeping', 'AC'],
@@ -134,6 +179,10 @@ final mockProperties = <Property>[
       area: 2860,
       bedrooms: 4,
       bathrooms: 4,
+      deposit: 0,
+      furnishing: Furnishing.semiFurnished,
+      floor: 0,
+      totalFloors: 2,
       description:
           'A spacious villa with a garden, natural light, and room to grow.',
       amenities: ['Garden', 'Parking', 'Security'],
@@ -148,6 +197,7 @@ final mockProperties = <Property>[
       locality: 'Kompally',
       price: 7800000,
       area: 1500,
+      furnishing: Furnishing.unfurnished,
       description:
           'A clear-title plot in a growing neighbourhood with excellent access.',
       amenities: ['Gated community', 'Water connection'],
@@ -161,11 +211,53 @@ final mockProperties = <Property>[
       locality: 'Powai',
       price: 62000,
       area: 950,
+      furnishing: Furnishing.unfurnished,
       description:
           'Street-facing commercial space suited to a boutique or studio.',
       amenities: ['Signage', 'Parking', 'Power backup'],
       owner: 'Harbor Homes',
       color: Color(0xffdfe7d5)),
+  const Property(
+      id: 'p6',
+      title: 'Maple House near Manyata Tech Park',
+      type: PropertyType.house,
+      city: 'Bengaluru',
+      locality: 'Hebbal',
+      price: 48000,
+      area: 2100,
+      bedrooms: 3,
+      bathrooms: 3,
+      deposit: 96000,
+      maintenance: 3500,
+      furnishing: Furnishing.semiFurnished,
+      floor: 0,
+      totalFloors: 2,
+      availability: 'Available from 1 Nov 2026',
+      description:
+          'An airy independent home with a quiet garden and excellent connectivity.',
+      amenities: ['Garden', 'Parking', 'Pet friendly'],
+      owner: 'Rohan Kapoor',
+      color: Color(0xffe4e0d2)),
+  const Property(
+      id: 'p7',
+      title: 'Cedar Co-living PG',
+      type: PropertyType.pg,
+      city: 'Hyderabad',
+      locality: 'Gachibowli',
+      price: 11000,
+      area: 180,
+      bedrooms: 1,
+      bathrooms: 1,
+      deposit: 11000,
+      maintenance: 0,
+      furnishing: Furnishing.fullyFurnished,
+      floor: 4,
+      totalFloors: 8,
+      description:
+          'A community-led PG with meals, housekeeping, and a welcoming common area.',
+      amenities: ['Meals', 'Wi-Fi', 'Housekeeping', 'Laundry'],
+      owner: 'Cedar Living',
+      color: Color(0xffdce8e1)),
 ];
 
 class IllaraStayApp extends StatelessWidget {
@@ -478,9 +570,13 @@ class Home extends StatelessWidget {
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         const Heading('Find your next address'),
         const SizedBox(height: 18),
-        const SearchBar(
+        SearchBar(
             hintText: 'Search by city, locality or landmark',
-            leading: Icon(Icons.search)),
+            leading: const Icon(Icons.search),
+            onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                    builder: (_) => Search(repo: repo, refresh: refresh)))),
         const SizedBox(height: 24),
         const Heading('Explore categories'),
         const SizedBox(height: 12),
@@ -491,7 +587,15 @@ class Home extends StatelessWidget {
                 children: PropertyType.values
                     .map((type) => Padding(
                         padding: const EdgeInsets.only(right: 8),
-                        child: Chip(label: Text(type.label))))
+                        child: ActionChip(
+                            label: Text(type.label),
+                            onPressed: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                    builder: (_) => Search(
+                                        repo: repo,
+                                        refresh: refresh,
+                                        initialFilter: type))))))
                     .toList())),
         const SizedBox(height: 24),
         const Heading('Handpicked for you'),
@@ -504,9 +608,14 @@ class Home extends StatelessWidget {
 }
 
 class Search extends StatefulWidget {
-  const Search({required this.repo, required this.refresh, super.key});
+  const Search(
+      {required this.repo,
+      required this.refresh,
+      this.initialFilter,
+      super.key});
   final PropertyRepository repo;
   final VoidCallback refresh;
+  final PropertyType? initialFilter;
   @override
   State<Search> createState() => _SearchState();
 }
@@ -514,6 +623,18 @@ class Search extends StatefulWidget {
 class _SearchState extends State<Search> {
   String query = '';
   PropertyType? filter;
+  double? minPrice;
+  double? maxPrice;
+  int? bedrooms;
+  Furnishing? furnishing;
+  final selectedAmenities = <String>{};
+
+  @override
+  void initState() {
+    super.initState();
+    filter = widget.initialFilter;
+  }
+
   @override
   Widget build(BuildContext context) {
     final data = widget.repo
@@ -522,7 +643,12 @@ class _SearchState extends State<Search> {
             (filter == null || p.type == filter) &&
             '${p.title} ${p.city} ${p.locality}'
                 .toLowerCase()
-                .contains(query.toLowerCase()))
+                .contains(query.toLowerCase()) &&
+            (minPrice == null || p.price >= minPrice!) &&
+            (maxPrice == null || p.price <= maxPrice!) &&
+            (bedrooms == null || p.bedrooms >= bedrooms!) &&
+            (furnishing == null || p.furnishing == furnishing) &&
+            selectedAmenities.every(p.amenities.contains))
         .toList();
     return Frame(
         title: 'Search homes',
@@ -532,20 +658,39 @@ class _SearchState extends State<Search> {
               decoration: const InputDecoration(
                   hintText: 'Search homes', prefixIcon: Icon(Icons.search))),
           const SizedBox(height: 12),
-          SizedBox(
-              height: 42,
-              child: ListView(scrollDirection: Axis.horizontal, children: [
-                ChoiceChip(
-                    label: const Text('All'),
-                    selected: filter == null,
-                    onSelected: (_) => setState(() => filter = null)),
-                ...PropertyType.values.map((t) => Padding(
-                    padding: const EdgeInsets.only(left: 8),
-                    child: ChoiceChip(
-                        label: Text(t.label),
-                        selected: filter == t,
-                        onSelected: (_) => setState(() => filter = t))))
-              ])),
+          Row(children: [
+            Expanded(
+                child: SizedBox(
+                    height: 42,
+                    child:
+                        ListView(scrollDirection: Axis.horizontal, children: [
+                      ChoiceChip(
+                          label: const Text('All'),
+                          selected: filter == null,
+                          onSelected: (_) => setState(() => filter = null)),
+                      ...PropertyType.values.map((t) => Padding(
+                          padding: const EdgeInsets.only(left: 8),
+                          child: ChoiceChip(
+                              label: Text(t.label),
+                              selected: filter == t,
+                              onSelected: (_) => setState(() => filter = t))))
+                    ]))),
+            IconButton(
+                tooltip: 'More filters',
+                onPressed: () => _showFilters(context),
+                icon: const Icon(Icons.tune))
+          ]),
+          if (minPrice != null ||
+              maxPrice != null ||
+              bedrooms != null ||
+              furnishing != null ||
+              selectedAmenities.isNotEmpty)
+            Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                    onPressed: _clearFilters,
+                    icon: const Icon(Icons.clear, size: 17),
+                    label: const Text('Clear advanced filters'))),
           const SizedBox(height: 16),
           Align(
               alignment: Alignment.centerLeft,
@@ -555,6 +700,159 @@ class _SearchState extends State<Search> {
               property: p, repo: widget.repo, refresh: widget.refresh))
         ]));
   }
+
+  void _clearFilters() => setState(() {
+        minPrice = null;
+        maxPrice = null;
+        bedrooms = null;
+        furnishing = null;
+        selectedAmenities.clear();
+      });
+
+  Future<void> _showFilters(BuildContext context) async {
+    final result = await showModalBottomSheet<_FilterValues>(
+        context: context,
+        isScrollControlled: true,
+        builder: (_) => FilterSheet(
+            minPrice: minPrice,
+            maxPrice: maxPrice,
+            bedrooms: bedrooms,
+            furnishing: furnishing,
+            amenities: selectedAmenities));
+    if (!mounted || result == null) return;
+    setState(() {
+      minPrice = result.minPrice;
+      maxPrice = result.maxPrice;
+      bedrooms = result.bedrooms;
+      furnishing = result.furnishing;
+      selectedAmenities
+        ..clear()
+        ..addAll(result.amenities);
+    });
+  }
+}
+
+class _FilterValues {
+  const _FilterValues(
+      {this.minPrice,
+      this.maxPrice,
+      this.bedrooms,
+      this.furnishing,
+      required this.amenities});
+  final double? minPrice, maxPrice;
+  final int? bedrooms;
+  final Furnishing? furnishing;
+  final Set<String> amenities;
+}
+
+class FilterSheet extends StatefulWidget {
+  const FilterSheet(
+      {required this.minPrice,
+      required this.maxPrice,
+      required this.bedrooms,
+      required this.furnishing,
+      required this.amenities,
+      super.key});
+  final double? minPrice, maxPrice;
+  final int? bedrooms;
+  final Furnishing? furnishing;
+  final Set<String> amenities;
+  @override
+  State<FilterSheet> createState() => _FilterSheetState();
+}
+
+class _FilterSheetState extends State<FilterSheet> {
+  late final minController = TextEditingController(
+      text: widget.minPrice == null ? '' : widget.minPrice!.toStringAsFixed(0));
+  late final maxController = TextEditingController(
+      text: widget.maxPrice == null ? '' : widget.maxPrice!.toStringAsFixed(0));
+  int? bedrooms;
+  Furnishing? furnishing;
+  late final amenities = {...widget.amenities};
+  final allAmenities = ['Parking', 'Wi-Fi', 'Lift', 'Power backup', 'Garden'];
+
+  @override
+  void initState() {
+    super.initState();
+    bedrooms = widget.bedrooms;
+    furnishing = widget.furnishing;
+  }
+
+  @override
+  Widget build(BuildContext context) => SafeArea(
+      child: Padding(
+          padding: EdgeInsets.fromLTRB(
+              20, 12, 20, MediaQuery.viewInsetsOf(context).bottom + 20),
+          child: SingleChildScrollView(
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                Row(children: [
+                  const Expanded(child: Heading('Filter properties')),
+                  IconButton(
+                      onPressed: () => Navigator.pop(context),
+                      icon: const Icon(Icons.close))
+                ]),
+                Row(children: [
+                  Expanded(
+                      child: TextField(
+                          controller: minController,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                              labelText: 'Min price', prefixText: '₹ '))),
+                  const SizedBox(width: 12),
+                  Expanded(
+                      child: TextField(
+                          controller: maxController,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                              labelText: 'Max price', prefixText: '₹ ')))
+                ]),
+                const SizedBox(height: 18),
+                const Text('Bedrooms',
+                    style: TextStyle(fontWeight: FontWeight.w700)),
+                Wrap(spacing: 8, children: [
+                  for (final value in [1, 2, 3, 4])
+                    ChoiceChip(
+                        label: Text('$value+'),
+                        selected: bedrooms == value,
+                        onSelected: (_) => setState(() => bedrooms = value))
+                ]),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<Furnishing>(
+                    initialValue: furnishing,
+                    decoration: const InputDecoration(labelText: 'Furnishing'),
+                    items: Furnishing.values
+                        .map((value) => DropdownMenuItem(
+                            value: value, child: Text(value.label)))
+                        .toList(),
+                    onChanged: (value) => setState(() => furnishing = value)),
+                const SizedBox(height: 14),
+                const Text('Amenities',
+                    style: TextStyle(fontWeight: FontWeight.w700)),
+                Wrap(spacing: 8, children: [
+                  for (final amenity in allAmenities)
+                    FilterChip(
+                        label: Text(amenity),
+                        selected: amenities.contains(amenity),
+                        onSelected: (selected) => setState(() => selected
+                            ? amenities.add(amenity)
+                            : amenities.remove(amenity)))
+                ]),
+                const SizedBox(height: 18),
+                SizedBox(
+                    width: double.infinity,
+                    child: FilledButton(
+                        onPressed: () => Navigator.pop(
+                            context,
+                            _FilterValues(
+                                minPrice: double.tryParse(minController.text),
+                                maxPrice: double.tryParse(maxController.text),
+                                bedrooms: bedrooms,
+                                furnishing: furnishing,
+                                amenities: amenities)),
+                        child: const Text('Apply filters')))
+              ]))));
 }
 
 class ListingCard extends StatelessWidget {
@@ -635,10 +933,12 @@ class Details extends StatelessWidget {
   final Property property;
   final PropertyRepository repo;
   final VoidCallback refresh;
+
   @override
   Widget build(BuildContext context) => Scaffold(
       appBar: AppBar(actions: [
         IconButton(
+            tooltip: 'Save property',
             onPressed: () {
               repo.toggleSaved(property.id);
               refresh();
@@ -648,11 +948,16 @@ class Details extends StatelessWidget {
                 : Icons.bookmark_border))
       ]),
       body: ListView(children: [
-        Container(
-            height: 210,
-            color: property.color,
-            child: const Icon(Icons.home_work_rounded,
-                size: 88, color: Color(0xff176b52))),
+        SizedBox(
+            height: 230,
+            child: PageView(children: [
+              _GalleryPanel(
+                  color: property.color, icon: Icons.home_work_rounded),
+              const _GalleryPanel(
+                  color: Color(0xffe3ece7), icon: Icons.photo_library_outlined),
+              const _GalleryPanel(
+                  color: Color(0xffe7e0d0), icon: Icons.map_outlined)
+            ])),
         Padding(
             padding: const EdgeInsets.all(20),
             child:
@@ -666,44 +971,239 @@ class Details extends StatelessWidget {
               Text('${property.locality}, ${property.city}',
                   style: const TextStyle(color: Colors.black54)),
               const SizedBox(height: 14),
-              Text('₹${property.price.toStringAsFixed(0)}',
+              Text(
+                  '₹${property.price.toStringAsFixed(0)}${property.listingType == ListingType.rent ? ' / month' : ''}',
                   style: const TextStyle(
                       fontSize: 25,
                       fontWeight: FontWeight.w800,
                       color: Color(0xff176b52))),
               const SizedBox(height: 14),
-              Wrap(spacing: 8, children: [
-                Chip(label: Text('${property.area} sq ft')),
+              Wrap(spacing: 8, runSpacing: 8, children: [
+                _InfoPill(
+                    icon: Icons.square_foot, text: '${property.area} sq ft'),
                 if (property.bedrooms > 0)
-                  Chip(label: Text('${property.bedrooms} bedrooms')),
-                ...property.amenities.map((a) => Chip(label: Text(a)))
+                  _InfoPill(
+                      icon: Icons.bed_outlined,
+                      text: '${property.bedrooms} bedrooms'),
+                if (property.bathrooms > 0)
+                  _InfoPill(
+                      icon: Icons.bathtub_outlined,
+                      text: '${property.bathrooms} baths'),
+                _InfoPill(
+                    icon: Icons.weekend_outlined,
+                    text: property.furnishing.label),
+                if (property.floor > 0)
+                  _InfoPill(
+                      icon: Icons.layers_outlined,
+                      text: 'Floor ${property.floor}/${property.totalFloors}')
               ]),
-              const SizedBox(height: 14),
+              const SizedBox(height: 18),
+              Row(children: [
+                Expanded(
+                    child: _DetailValue(
+                        label: 'Deposit',
+                        value: property.deposit == 0
+                            ? 'Not applicable'
+                            : '₹${property.deposit.toStringAsFixed(0)}')),
+                Expanded(
+                    child: _DetailValue(
+                        label: 'Maintenance',
+                        value: property.maintenance == 0
+                            ? 'Included'
+                            : '₹${property.maintenance.toStringAsFixed(0)} / month'))
+              ]),
+              const SizedBox(height: 12),
+              _DetailValue(label: 'Availability', value: property.availability),
+              const SizedBox(height: 18),
+              const Heading('Amenities'),
+              const SizedBox(height: 10),
+              Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: property.amenities
+                      .map((a) => Chip(
+                          avatar: const Icon(Icons.check, size: 16),
+                          label: Text(a)))
+                      .toList()),
+              const SizedBox(height: 18),
+              const Heading('About this property'),
+              const SizedBox(height: 8),
               Text(property.description,
                   style: const TextStyle(color: Colors.black54, height: 1.5)),
               const SizedBox(height: 18),
+              const Heading('Owner information'),
+              const SizedBox(height: 10),
               Row(children: [
                 CircleAvatar(child: Text(property.owner[0])),
                 const SizedBox(width: 10),
-                Text('Listed by ${property.owner}',
-                    style: const TextStyle(fontWeight: FontWeight.w700)),
-                const Spacer(),
+                Expanded(
+                    child: Text('Listed by ${property.owner}',
+                        style: const TextStyle(fontWeight: FontWeight.w700))),
                 OutlinedButton.icon(
-                    onPressed: () {},
+                    onPressed: () => _contactOwner(context),
                     icon: const Icon(Icons.call_outlined),
                     label: const Text('Contact'))
               ]),
               const SizedBox(height: 18),
-              FilledButton.icon(
-                  onPressed: () {
-                    repo.requestVisit(property);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Visit request sent.')));
-                  },
-                  icon: const Icon(Icons.calendar_month),
-                  label: const Text('Request a visit'))
+              SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.icon(
+                      onPressed: () => showModalBottomSheet<void>(
+                          context: context,
+                          isScrollControlled: true,
+                          builder: (_) => RequestVisitSheet(
+                              property: property, repo: repo)),
+                      icon: const Icon(Icons.calendar_month),
+                      label: const Text('Request a visit')))
             ]))
       ]));
+
+  void _contactOwner(BuildContext context) => showDialog<void>(
+      context: context,
+      builder: (_) => AlertDialog(
+              title: Text('Contact ${property.owner}'),
+              content: const Text(
+                  'The owner will be notified of your interest. You can continue the conversation after they respond.'),
+              actions: [
+                TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Close')),
+                FilledButton(
+                    onPressed: () {
+                      Navigator.pop(context);
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                          content: Text('Owner contact request sent.')));
+                    },
+                    child: const Text('Send request'))
+              ]));
+}
+
+class _GalleryPanel extends StatelessWidget {
+  const _GalleryPanel({required this.color, required this.icon});
+  final Color color;
+  final IconData icon;
+  @override
+  Widget build(BuildContext context) => Container(
+      color: color,
+      child:
+          Center(child: Icon(icon, size: 86, color: const Color(0xff176b52))));
+}
+
+class _InfoPill extends StatelessWidget {
+  const _InfoPill({required this.icon, required this.text});
+  final IconData icon;
+  final String text;
+  @override
+  Widget build(BuildContext context) =>
+      Chip(avatar: Icon(icon, size: 17), label: Text(text));
+}
+
+class _DetailValue extends StatelessWidget {
+  const _DetailValue({required this.label, required this.value});
+  final String label, value;
+  @override
+  Widget build(BuildContext context) =>
+      Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(label,
+            style: const TextStyle(color: Colors.black54, fontSize: 12)),
+        const SizedBox(height: 3),
+        Text(value, style: const TextStyle(fontWeight: FontWeight.w700))
+      ]);
+}
+
+class RequestVisitSheet extends StatefulWidget {
+  const RequestVisitSheet(
+      {required this.property, required this.repo, super.key});
+  final Property property;
+  final PropertyRepository repo;
+  @override
+  State<RequestVisitSheet> createState() => _RequestVisitSheetState();
+}
+
+class _RequestVisitSheetState extends State<RequestVisitSheet> {
+  DateTime? date;
+  TimeOfDay? time;
+  final messageController = TextEditingController();
+
+  @override
+  Widget build(BuildContext context) => SafeArea(
+      child: Padding(
+          padding: EdgeInsets.fromLTRB(
+              20, 12, 20, MediaQuery.viewInsetsOf(context).bottom + 20),
+          child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(children: [
+                  const Expanded(child: Heading('Request a visit')),
+                  IconButton(
+                      onPressed: () => Navigator.pop(context),
+                      icon: const Icon(Icons.close))
+                ]),
+                Text(widget.property.title,
+                    style: const TextStyle(color: Colors.black54)),
+                const SizedBox(height: 16),
+                Row(children: [
+                  Expanded(
+                      child: OutlinedButton.icon(
+                          onPressed: () async {
+                            final value = await showDatePicker(
+                                context: context,
+                                firstDate: DateTime.now(),
+                                lastDate: DateTime.now()
+                                    .add(const Duration(days: 90)),
+                                initialDate: DateTime.now()
+                                    .add(const Duration(days: 1)));
+                            if (value != null) setState(() => date = value);
+                          },
+                          icon: const Icon(Icons.event_outlined),
+                          label: Text(date == null
+                              ? 'Preferred date'
+                              : '${date!.day}/${date!.month}/${date!.year}'))),
+                  const SizedBox(width: 10),
+                  Expanded(
+                      child: OutlinedButton.icon(
+                          onPressed: () async {
+                            final value = await showTimePicker(
+                                context: context, initialTime: TimeOfDay.now());
+                            if (value != null) setState(() => time = value);
+                          },
+                          icon: const Icon(Icons.schedule_outlined),
+                          label: Text(time == null
+                              ? 'Preferred time'
+                              : time!.format(context))))
+                ]),
+                const SizedBox(height: 14),
+                TextField(
+                    controller: messageController,
+                    maxLines: 3,
+                    decoration: const InputDecoration(
+                        labelText: 'Message to owner',
+                        hintText: 'Tell the owner a little about your visit')),
+                const SizedBox(height: 16),
+                SizedBox(
+                    width: double.infinity,
+                    child: FilledButton(
+                        onPressed: date == null || time == null
+                            ? null
+                            : () {
+                                widget.repo.requestVisit(widget.property,
+                                    preferredDate: date,
+                                    preferredTime: time,
+                                    message: messageController.text);
+                                Navigator.pop(context);
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                        content: Text('Visit request sent.')));
+                              },
+                        child: const Text('Send visit request')))
+              ])));
+
+  @override
+  void dispose() {
+    messageController.dispose();
+    super.dispose();
+  }
 }
 
 class Saved extends StatelessWidget {
@@ -746,11 +1246,27 @@ class RequestTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Card(
       elevation: 0,
-      child: ListTile(
+      child: ExpansionTile(
           title: Text(request.property.title,
               style: const TextStyle(fontWeight: FontWeight.w700)),
-          subtitle: Text(request.property.locality),
-          trailing: Chip(label: Text(request.status.label))));
+          subtitle:
+              Text('${request.property.locality}, ${request.property.city}'),
+          trailing: Chip(label: Text(request.status.label)),
+          childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          children: [
+            Align(
+                alignment: Alignment.centerLeft,
+                child: Text(request.preferredDate == null
+                    ? 'Appointment: To be scheduled'
+                    : 'Appointment: ${request.preferredDate!.day}/${request.preferredDate!.month}/${request.preferredDate!.year} at ${request.preferredTime?.format(context) ?? 'preferred time'}')),
+            if (request.message.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text('"${request.message}"',
+                      style: const TextStyle(color: Colors.black54)))
+            ]
+          ]));
 }
 
 class Empty extends StatelessWidget {
@@ -768,33 +1284,106 @@ class Empty extends StatelessWidget {
           ])));
 }
 
-class Profile extends StatelessWidget {
+class Profile extends StatefulWidget {
   const Profile({super.key});
   @override
-  Widget build(BuildContext context) => const Frame(
+  State<Profile> createState() => _ProfileState();
+}
+
+class _ProfileState extends State<Profile> {
+  String name = 'Aanya Sharma';
+  String email = 'aanya@example.com';
+  String phone = '+91 98765 43210';
+  String city = 'Bengaluru';
+
+  @override
+  Widget build(BuildContext context) => Frame(
       title: 'Profile',
       child: Column(children: [
-        CircleAvatar(
-          radius: 38,
-          backgroundColor: Color(0xffdcebe0),
-          child: Text('A',
-              style: TextStyle(fontSize: 28, color: Color(0xff176b52))),
-        ),
-        SizedBox(height: 12),
-        Text('Aanya Sharma',
-            style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
-        Text('aanya@example.com', style: TextStyle(color: Colors.black54)),
-        SizedBox(height: 24),
+        const CircleAvatar(
+            radius: 38,
+            backgroundColor: Color(0xffdcebe0),
+            child: Text('A',
+                style: TextStyle(fontSize: 28, color: Color(0xff176b52)))),
+        const SizedBox(height: 12),
+        Text(name,
+            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+        Text(email, style: const TextStyle(color: Colors.black54)),
+        const SizedBox(height: 24),
+        Card(
+            elevation: 0,
+            child: Column(children: [
+              ListTile(
+                  leading: const Icon(Icons.phone_outlined),
+                  title: Text(phone),
+                  subtitle: const Text('Phone number')),
+              ListTile(
+                  leading: const Icon(Icons.location_city_outlined),
+                  title: Text(city),
+                  subtitle: const Text('Current city'))
+            ])),
+        const SizedBox(height: 12),
         ListTile(
-            leading: Icon(Icons.person_outline),
-            title: Text('Personal details')),
-        ListTile(
+            leading: const Icon(Icons.edit_outlined),
+            title: const Text('Edit profile'),
+            onTap: _editProfile),
+        const ListTile(
             leading: Icon(Icons.notifications_none),
             title: Text('Notifications')),
-        ListTile(
+        const ListTile(
             leading: Icon(Icons.help_outline), title: Text('Help and support')),
-        ListTile(leading: Icon(Icons.logout), title: Text('Sign out'))
+        ListTile(
+            leading: const Icon(Icons.logout),
+            title: const Text('Log out'),
+            onTap: () =>
+                Navigator.of(context).popUntil((route) => route.isFirst))
       ]));
+
+  Future<void> _editProfile() async {
+    final nameController = TextEditingController(text: name);
+    final phoneController = TextEditingController(text: phone);
+    final cityController = TextEditingController(text: city);
+    final saved = await showDialog<bool>(
+        context: context,
+        builder: (_) => AlertDialog(
+                title: const Text('Edit profile'),
+                content: Column(mainAxisSize: MainAxisSize.min, children: [
+                  TextField(
+                      controller: nameController,
+                      decoration: const InputDecoration(labelText: 'Name')),
+                  TextField(
+                      controller: phoneController,
+                      decoration: const InputDecoration(labelText: 'Phone')),
+                  TextField(
+                      controller: cityController,
+                      decoration: const InputDecoration(labelText: 'City'))
+                ]),
+                actions: [
+                  TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('Cancel')),
+                  FilledButton(
+                      onPressed: () => Navigator.pop(context, true),
+                      child: const Text('Save'))
+                ]));
+    if (!mounted) return;
+    if (saved == true) {
+      setState(() {
+        name = nameController.text.trim().isEmpty
+            ? name
+            : nameController.text.trim();
+        phone = phoneController.text.trim().isEmpty
+            ? phone
+            : phoneController.text.trim();
+        city = cityController.text.trim().isEmpty
+            ? city
+            : cityController.text.trim();
+      });
+    }
+    nameController.dispose();
+    phoneController.dispose();
+    cityController.dispose();
+  }
 }
 
 class Dashboard extends StatelessWidget {
@@ -881,7 +1470,7 @@ class OwnerRequests extends StatelessWidget {
                       child: Column(children: [
                         ListTile(
                             title: Text(r.property.title),
-                            subtitle: Text('Requested by Aanya Sharma')),
+                            subtitle: const Text('Requested by Aanya Sharma')),
                         if (r.status == RequestStatus.pending)
                           Row(
                               mainAxisAlignment: MainAxisAlignment.end,
