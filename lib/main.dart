@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 void main() => runApp(const IllaraStayApp());
 
-enum UserRole { seeker, owner }
+enum UserRole { seeker, owner, admin }
 
 enum PropertyType { pg, room, flat, house, villa, residentialLand, commercial }
 
@@ -11,6 +11,10 @@ enum ListingType { rent, sale }
 enum Furnishing { unfurnished, semiFurnished, fullyFurnished }
 
 enum RequestStatus { pending, accepted, rejected, completed }
+
+enum AccountStatus { active, blocked, suspended }
+
+enum PropertyApprovalStatus { pending, approved, rejected }
 
 extension PropertyTypeName on PropertyType {
   String get label => switch (this) {
@@ -65,6 +69,7 @@ class Property {
       this.otherCharges = 0,
       this.photos = const [],
       this.published = true,
+      this.approvalStatus = PropertyApprovalStatus.approved,
       this.ownerId = 'owner-1'});
   final String id, title, city, locality, description, owner;
   final String availability, address, ownerId;
@@ -79,6 +84,7 @@ class Property {
   final List<String> photos;
   final Color color;
   final bool published;
+  final PropertyApprovalStatus approvalStatus;
 
   Property copyWith({
     String? id,
@@ -109,6 +115,7 @@ class Property {
     String? address,
     String? ownerId,
     bool? published,
+    PropertyApprovalStatus? approvalStatus,
   }) =>
       Property(
         id: id ?? this.id,
@@ -138,8 +145,46 @@ class Property {
         otherCharges: otherCharges ?? this.otherCharges,
         photos: photos ?? this.photos,
         published: published ?? this.published,
+        approvalStatus: approvalStatus ?? this.approvalStatus,
         ownerId: ownerId ?? this.ownerId,
       );
+}
+
+class AppUser {
+  AppUser(this.id,
+      {required this.name,
+      required this.email,
+      required this.phone,
+      required this.role,
+      required this.city,
+      required this.createdDate,
+      this.status = AccountStatus.active});
+  final String id, name, email, phone, city;
+  final UserRole role;
+  final DateTime createdDate;
+  AccountStatus status;
+}
+
+class AdminReport {
+  AdminReport(this.id,
+      {required this.subject,
+      required this.reporter,
+      required this.reason,
+      this.status = 'Pending'});
+  final String id, subject, reporter, reason;
+  String status;
+}
+
+class AdminReview {
+  AdminReview(this.id,
+      {required this.propertyTitle,
+      required this.reviewer,
+      required this.rating,
+      required this.comment,
+      this.status = 'Pending'});
+  final String id, propertyTitle, reviewer, comment;
+  final int rating;
+  String status;
 }
 
 class PropertyRequest {
@@ -175,7 +220,19 @@ abstract class PropertyRepository {
   void setPublished(String id, bool published);
 }
 
-class MockPropertyRepository implements PropertyRepository {
+/// Admin data remains behind a separate boundary for a future moderation API.
+abstract class AdminRepository {
+  List<AppUser> users();
+  List<Property> allProperties();
+  List<AdminReport> reports();
+  List<AdminReview> reviews();
+  void setUserStatus(String id, AccountStatus status);
+  void setApproval(String id, PropertyApprovalStatus status);
+  void resolveReport(String id, String status);
+  void resolveReview(String id, String status);
+}
+
+class MockPropertyRepository implements PropertyRepository, AdminRepository {
   final savedIds = <String>{'p2'};
   final visitRequests = <PropertyRequest>[
     PropertyRequest('r1', mockProperties.first,
@@ -187,12 +244,67 @@ class MockPropertyRepository implements PropertyRepository {
   final ownerProperties = <Property>[
     ...mockProperties.where((p) => p.id == 'p1' || p.id == 'p2' || p.id == 'p6')
   ];
+  final mockUsers = <AppUser>[
+    AppUser('u1',
+        name: 'Aanya Sharma',
+        email: 'aanya@example.com',
+        phone: '+91 98765 43210',
+        role: UserRole.seeker,
+        city: 'Bengaluru',
+        createdDate: DateTime(2026, 7, 4)),
+    AppUser('u2',
+        name: 'Aarav Mehta',
+        email: 'aarav@illarastay.com',
+        phone: '+91 98765 11223',
+        role: UserRole.owner,
+        city: 'Bengaluru',
+        createdDate: DateTime(2026, 6, 18)),
+    AppUser('u3',
+        name: 'Maya Rao',
+        email: 'maya@illarastay.com',
+        phone: '+91 98765 22446',
+        role: UserRole.owner,
+        city: 'Bengaluru',
+        createdDate: DateTime(2026, 7, 12),
+        status: AccountStatus.suspended),
+    AppUser('u4',
+        name: 'Ishaan Verma',
+        email: 'ishaan@example.com',
+        phone: '+91 98765 77889',
+        role: UserRole.seeker,
+        city: 'Pune',
+        createdDate: DateTime(2026, 8, 1)),
+    AppUser('u5',
+        name: 'Priya Nair',
+        email: 'priya@illarastay.com',
+        phone: '+91 98765 99001',
+        role: UserRole.admin,
+        city: 'Bengaluru',
+        createdDate: DateTime(2026, 5, 20))
+  ];
+  final mockReports = <AdminReport>[
+    AdminReport('report-1',
+        subject: 'The Green Room',
+        reporter: 'Ishaan Verma',
+        reason: 'Listing address appears misleading.')
+  ];
+  final mockReviews = <AdminReview>[
+    AdminReview('review-1',
+        propertyTitle: 'Sunlit 2 BHK in Indiranagar',
+        reviewer: 'Aanya Sharma',
+        rating: 4,
+        comment: 'Helpful owner and a well-maintained home.')
+  ];
   @override
   List<Property> properties() => [
         ...ownerProperties,
         ...mockProperties
             .where((p) => !ownerProperties.any((owned) => owned.id == p.id))
-      ].where((p) => p.published).toList();
+      ]
+          .where((p) =>
+              p.published &&
+              p.approvalStatus == PropertyApprovalStatus.approved)
+          .toList();
   @override
   List<Property> ownedProperties() => ownerProperties;
   @override
@@ -239,6 +351,49 @@ class MockPropertyRepository implements PropertyRepository {
       ownerProperties[index] =
           ownerProperties[index].copyWith(published: published);
     }
+  }
+
+  @override
+  List<AppUser> users() => mockUsers;
+
+  @override
+  List<Property> allProperties() => [
+        ...ownerProperties,
+        ...mockProperties
+            .where((p) => !ownerProperties.any((owned) => owned.id == p.id))
+      ];
+
+  @override
+  List<AdminReport> reports() => mockReports;
+
+  @override
+  List<AdminReview> reviews() => mockReviews;
+
+  @override
+  void setUserStatus(String id, AccountStatus status) {
+    final user = mockUsers.where((item) => item.id == id).firstOrNull;
+    user?.status = status;
+  }
+
+  @override
+  void setApproval(String id, PropertyApprovalStatus status) {
+    final index = ownerProperties.indexWhere((item) => item.id == id);
+    if (index >= 0) {
+      ownerProperties[index] =
+          ownerProperties[index].copyWith(approvalStatus: status);
+    }
+  }
+
+  @override
+  void resolveReport(String id, String status) {
+    final report = mockReports.where((item) => item.id == id).firstOrNull;
+    report?.status = status;
+  }
+
+  @override
+  void resolveReview(String id, String status) {
+    final review = mockReviews.where((item) => item.id == id).firstOrNull;
+    review?.status = status;
   }
 }
 
@@ -350,6 +505,7 @@ final mockProperties = <Property>[
       floor: 0,
       totalFloors: 2,
       availability: 'Available from 1 Nov 2026',
+      approvalStatus: PropertyApprovalStatus.pending,
       description:
           'An airy independent home with a quiet garden and excellent connectivity.',
       amenities: ['Garden', 'Parking', 'Pet friendly'],
@@ -464,7 +620,22 @@ class LoginScreen extends StatelessWidget {
       subtitle: 'Sign in to continue your property journey.',
       button: 'Sign in',
       next: () => Navigator.pushReplacement(
-          context, MaterialPageRoute(builder: (_) => const RoleScreen())));
+          context, MaterialPageRoute(builder: (_) => const RoleScreen())),
+      showAdminEntry: true);
+}
+
+class AdminLoginScreen extends StatelessWidget {
+  const AdminLoginScreen({super.key});
+  @override
+  Widget build(BuildContext context) => AuthPage(
+      title: 'Admin portal',
+      subtitle: 'Secure access for IllaraStay operations staff.',
+      button: 'Sign in as admin',
+      showAdminEntry: false,
+      next: () => Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+              builder: (_) => AdminShell(repo: MockPropertyRepository()))));
 }
 
 class RegisterScreen extends StatelessWidget {
@@ -486,10 +657,12 @@ class AuthPage extends StatelessWidget {
       required this.button,
       required this.next,
       this.register = false,
+      this.showAdminEntry = false,
       super.key});
   final String title, subtitle, button;
   final VoidCallback next;
   final bool register;
+  final bool showAdminEntry;
   @override
   Widget build(BuildContext context) => Scaffold(
       appBar:
@@ -528,7 +701,13 @@ class AuthPage extends StatelessWidget {
                         : const RegisterScreen())),
             child: Text(register
                 ? 'Already have an account? Sign in'
-                : 'New to IllaraStay? Create an account'))
+                : 'New to IllaraStay? Create an account')),
+        if (showAdminEntry)
+          TextButton.icon(
+              onPressed: () => Navigator.push(context,
+                  MaterialPageRoute(builder: (_) => const AdminLoginScreen())),
+              icon: const Icon(Icons.admin_panel_settings_outlined),
+              label: const Text('Admin portal'))
       ]));
 }
 
@@ -649,6 +828,523 @@ class _ShellState extends State<Shell> {
   }
 
   void refresh() => setState(() {});
+}
+
+class AdminShell extends StatefulWidget {
+  const AdminShell({required this.repo, super.key});
+  final MockPropertyRepository repo;
+  @override
+  State<AdminShell> createState() => _AdminShellState();
+}
+
+class _AdminShellState extends State<AdminShell> {
+  int index = 0;
+  @override
+  Widget build(BuildContext context) {
+    final pages = [
+      AdminDashboard(repo: widget.repo, refresh: refresh),
+      AdminUsers(repo: widget.repo, refresh: refresh),
+      AdminProperties(repo: widget.repo, refresh: refresh),
+      AdminMore(repo: widget.repo, refresh: refresh)
+    ];
+    const labels = ['Dashboard', 'Users', 'Properties', 'More'];
+    const icons = [
+      Icons.dashboard_outlined,
+      Icons.people_outline,
+      Icons.apartment_outlined,
+      Icons.menu_rounded
+    ];
+    return Scaffold(
+        body: IndexedStack(index: index, children: pages),
+        bottomNavigationBar: NavigationBar(
+            selectedIndex: index,
+            onDestinationSelected: (value) => setState(() => index = value),
+            destinations: [
+              for (var i = 0; i < labels.length; i++)
+                NavigationDestination(icon: Icon(icons[i]), label: labels[i])
+            ]));
+  }
+
+  void refresh() => setState(() {});
+}
+
+class AdminDashboard extends StatelessWidget {
+  const AdminDashboard({required this.repo, required this.refresh, super.key});
+  final MockPropertyRepository repo;
+  final VoidCallback refresh;
+  @override
+  Widget build(BuildContext context) {
+    final users = repo.users();
+    final properties = repo.allProperties();
+    return AdminFrame(
+        title: 'Admin dashboard',
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Heading('Operations overview'),
+          const SizedBox(height: 6),
+          const Text('Keep the IllaraStay marketplace healthy and trusted.',
+              style: TextStyle(color: Colors.black54)),
+          const SizedBox(height: 20),
+          Row(children: [
+            AdminStat(value: '${users.length}', label: 'Total users'),
+            const SizedBox(width: 10),
+            AdminStat(
+                value:
+                    '${users.where((u) => u.role == UserRole.seeker).length}',
+                label: 'Tenants')
+          ]),
+          const SizedBox(height: 10),
+          Row(children: [
+            AdminStat(
+                value: '${users.where((u) => u.role == UserRole.owner).length}',
+                label: 'Owners'),
+            const SizedBox(width: 10),
+            AdminStat(value: '${properties.length}', label: 'Properties')
+          ]),
+          const SizedBox(height: 10),
+          Row(children: [
+            AdminStat(
+                value:
+                    '${properties.where((p) => p.approvalStatus == PropertyApprovalStatus.pending).length}',
+                label: 'Pending approvals'),
+            const SizedBox(width: 10),
+            AdminStat(
+                value:
+                    '${properties.where((p) => p.published && p.approvalStatus == PropertyApprovalStatus.approved).length}',
+                label: 'Active properties')
+          ]),
+          const SizedBox(height: 10),
+          Row(children: [
+            AdminStat(
+                value:
+                    '${repo.reports().where((r) => r.status == 'Pending').length}',
+                label: 'Pending reports'),
+            const SizedBox(width: 10),
+            AdminStat(
+                value:
+                    '${repo.reviews().where((r) => r.status == 'Pending').length}',
+                label: 'Pending reviews')
+          ]),
+          const SizedBox(height: 26),
+          const Heading('Recent activity'),
+          const SizedBox(height: 10),
+          const ActivityRow(
+              icon: Icons.person_add_outlined,
+              title: 'New tenant registered',
+              detail: 'Aanya Sharma joined Bengaluru'),
+          const ActivityRow(
+              icon: Icons.home_work_outlined,
+              title: 'Property awaiting review',
+              detail: 'Sunlit 2 BHK in Indiranagar'),
+          const ActivityRow(
+              icon: Icons.flag_outlined,
+              title: 'New report received',
+              detail: 'The Green Room was reported')
+        ]));
+  }
+}
+
+class AdminStat extends StatelessWidget {
+  const AdminStat({required this.value, required this.label, super.key});
+  final String value, label;
+  @override
+  Widget build(BuildContext context) => Expanded(
+      child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+              color: const Color(0xff123047),
+              borderRadius: BorderRadius.circular(14)),
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(value,
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 23,
+                    fontWeight: FontWeight.w800)),
+            const SizedBox(height: 3),
+            Text(label,
+                style: const TextStyle(color: Colors.white70, fontSize: 12))
+          ])));
+}
+
+class ActivityRow extends StatelessWidget {
+  const ActivityRow(
+      {required this.icon,
+      required this.title,
+      required this.detail,
+      super.key});
+  final IconData icon;
+  final String title, detail;
+  @override
+  Widget build(BuildContext context) => ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: CircleAvatar(
+          backgroundColor: const Color(0xffdcebe0),
+          child: Icon(icon, color: const Color(0xff176b52))),
+      title: Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
+      subtitle: Text(detail));
+}
+
+class AdminUsers extends StatelessWidget {
+  const AdminUsers({required this.repo, required this.refresh, super.key});
+  final MockPropertyRepository repo;
+  final VoidCallback refresh;
+
+  @override
+  Widget build(BuildContext context) => AdminFrame(
+      title: 'User management',
+      child: Column(
+          children: repo
+              .users()
+              .map((user) => Card(
+                  elevation: 0,
+                  margin: const EdgeInsets.only(bottom: 10),
+                  child: ListTile(
+                      leading: CircleAvatar(child: Text(user.name[0])),
+                      title: Text(user.name,
+                          style: const TextStyle(fontWeight: FontWeight.w700)),
+                      subtitle: Text(
+                          '${user.email}\n${user.phone} • ${user.city}\n${_roleLabel(user.role)} • ${_statusLabel(user.status)} • Joined ${user.createdDate.day}/${user.createdDate.month}/${user.createdDate.year}'),
+                      isThreeLine: true,
+                      onTap: () => showDialog<void>(
+                          context: context,
+                          builder: (_) => AlertDialog(
+                                  title: Text(user.name),
+                                  content: Text(
+                                      '${user.email}\n${user.phone}\n${_roleLabel(user.role)}\n${_statusLabel(user.status)}\nJoined ${user.createdDate.day}/${user.createdDate.month}/${user.createdDate.year}'),
+                                  actions: [
+                                    TextButton(
+                                        onPressed: () => Navigator.pop(context),
+                                        child: const Text('Close'))
+                                  ])),
+                      trailing: PopupMenuButton<AccountStatus>(
+                          tooltip: 'Manage user',
+                          onSelected: (status) {
+                            repo.setUserStatus(user.id, status);
+                            refresh();
+                          },
+                          itemBuilder: (_) => const [
+                                PopupMenuItem(
+                                    value: AccountStatus.active,
+                                    child: Text('Unblock / activate')),
+                                PopupMenuItem(
+                                    value: AccountStatus.blocked,
+                                    child: Text('Block')),
+                                PopupMenuItem(
+                                    value: AccountStatus.suspended,
+                                    child: Text('Suspend'))
+                              ]))))
+              .toList()));
+
+  String _roleLabel(UserRole role) => switch (role) {
+        UserRole.seeker => 'Tenant',
+        UserRole.owner => 'Owner',
+        UserRole.admin => 'Admin'
+      };
+
+  String _statusLabel(AccountStatus status) => switch (status) {
+        AccountStatus.active => 'Active',
+        AccountStatus.blocked => 'Blocked',
+        AccountStatus.suspended => 'Suspended'
+      };
+}
+
+class AdminProperties extends StatelessWidget {
+  const AdminProperties({required this.repo, required this.refresh, super.key});
+  final MockPropertyRepository repo;
+  final VoidCallback refresh;
+
+  @override
+  Widget build(BuildContext context) => AdminFrame(
+      title: 'Property moderation',
+      child: Column(
+          children: repo
+              .allProperties()
+              .map((property) => Card(
+                  elevation: 0,
+                  margin: const EdgeInsets.only(bottom: 12),
+                  child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Column(children: [
+                        Row(children: [
+                          Container(
+                              width: 62,
+                              height: 62,
+                              decoration: BoxDecoration(
+                                  color: property.color,
+                                  borderRadius: BorderRadius.circular(10)),
+                              child: const Icon(Icons.home_work_rounded,
+                                  color: Color(0xff176b52))),
+                          const SizedBox(width: 10),
+                          Expanded(
+                              child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                Text(property.title,
+                                    style: const TextStyle(
+                                        fontWeight: FontWeight.w700)),
+                                Text(
+                                    '${property.owner} • ${property.type.label}',
+                                    style:
+                                        const TextStyle(color: Colors.black54)),
+                                Text(
+                                    '${property.locality}, ${property.city} • ₹${property.price.toStringAsFixed(0)}')
+                              ]))
+                        ]),
+                        const SizedBox(height: 10),
+                        Row(children: [
+                          StatusBadge(
+                              label: _approvalLabel(property.approvalStatus),
+                              positive: property.approvalStatus ==
+                                  PropertyApprovalStatus.approved),
+                          const Spacer(),
+                          Text(property.published ? 'Published' : 'Unpublished',
+                              style: const TextStyle(color: Colors.black54)),
+                          if (property.approvalStatus ==
+                              PropertyApprovalStatus.pending) ...[
+                            const SizedBox(width: 8),
+                            TextButton(
+                                onPressed: () {
+                                  repo.setApproval(property.id,
+                                      PropertyApprovalStatus.rejected);
+                                  refresh();
+                                },
+                                child: const Text('Reject')),
+                            FilledButton(
+                                onPressed: () {
+                                  repo.setApproval(property.id,
+                                      PropertyApprovalStatus.approved);
+                                  refresh();
+                                },
+                                child: const Text('Approve'))
+                          ]
+                        ]),
+                        Align(
+                            alignment: Alignment.centerLeft,
+                            child: TextButton.icon(
+                                onPressed: () => Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                        builder: (_) => Details(
+                                            property: property,
+                                            repo: repo,
+                                            refresh: refresh))),
+                                icon: const Icon(Icons.visibility_outlined),
+                                label: const Text('View property')))
+                      ]))))
+              .toList()));
+
+  String _approvalLabel(PropertyApprovalStatus status) => switch (status) {
+        PropertyApprovalStatus.pending => 'Pending approval',
+        PropertyApprovalStatus.approved => 'Approved',
+        PropertyApprovalStatus.rejected => 'Rejected'
+      };
+}
+
+class AdminMore extends StatelessWidget {
+  const AdminMore({required this.repo, required this.refresh, super.key});
+  final MockPropertyRepository repo;
+  final VoidCallback refresh;
+  @override
+  Widget build(BuildContext context) => AdminFrame(
+      title: 'Admin tools',
+      child: Column(children: [
+        AdminMenuTile(
+            icon: Icons.flag_outlined,
+            title: 'Reports',
+            subtitle:
+                '${repo.reports().where((r) => r.status == 'Pending').length} pending',
+            onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                    builder: (_) =>
+                        AdminReports(repo: repo, refresh: refresh)))),
+        AdminMenuTile(
+            icon: Icons.rate_review_outlined,
+            title: 'Reviews',
+            subtitle:
+                '${repo.reviews().where((r) => r.status == 'Pending').length} pending',
+            onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                    builder: (_) =>
+                        AdminReviews(repo: repo, refresh: refresh)))),
+        AdminMenuTile(
+            icon: Icons.settings_outlined,
+            title: 'Settings',
+            subtitle: 'Moderation preferences',
+            onTap: () => Navigator.push(context,
+                MaterialPageRoute(builder: (_) => const AdminSettings()))),
+        AdminMenuTile(
+            icon: Icons.person_outline,
+            title: 'Admin profile',
+            subtitle: 'Priya Nair',
+            onTap: () => Navigator.push(context,
+                MaterialPageRoute(builder: (_) => const AdminProfile()))),
+        const SizedBox(height: 18),
+        ListTile(
+            leading: const Icon(Icons.logout),
+            title: const Text('Log out'),
+            onTap: () =>
+                Navigator.of(context).popUntil((route) => route.isFirst))
+      ]));
+}
+
+class AdminMenuTile extends StatelessWidget {
+  const AdminMenuTile(
+      {required this.icon,
+      required this.title,
+      required this.subtitle,
+      required this.onTap,
+      super.key});
+  final IconData icon;
+  final String title, subtitle;
+  final VoidCallback onTap;
+  @override
+  Widget build(BuildContext context) => Card(
+      elevation: 0,
+      child: ListTile(
+          onTap: onTap,
+          leading: Icon(icon, color: const Color(0xff176b52)),
+          title:
+              Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
+          subtitle: Text(subtitle),
+          trailing: const Icon(Icons.chevron_right)));
+}
+
+class AdminReports extends StatelessWidget {
+  const AdminReports({required this.repo, required this.refresh, super.key});
+  final MockPropertyRepository repo;
+  final VoidCallback refresh;
+
+  @override
+  Widget build(BuildContext context) => AdminFrame(
+      title: 'Reports',
+      child: Column(
+          children: repo
+              .reports()
+              .map((report) => Card(
+                  elevation: 0,
+                  child: ListTile(
+                      title: Text(report.subject,
+                          style: const TextStyle(fontWeight: FontWeight.w700)),
+                      subtitle: Text('${report.reporter}\n${report.reason}'),
+                      isThreeLine: true,
+                      trailing: report.status == 'Pending'
+                          ? TextButton(
+                              onPressed: () {
+                                repo.resolveReport(report.id, 'Resolved');
+                                refresh();
+                              },
+                              child: const Text('Resolve'))
+                          : const Text('Resolved'))))
+              .toList()));
+}
+
+class AdminReviews extends StatelessWidget {
+  const AdminReviews({required this.repo, required this.refresh, super.key});
+  final MockPropertyRepository repo;
+  final VoidCallback refresh;
+
+  @override
+  Widget build(BuildContext context) => AdminFrame(
+      title: 'Reviews',
+      child: Column(
+          children: repo
+              .reviews()
+              .map((review) => Card(
+                  elevation: 0,
+                  child: ListTile(
+                      title: Text(review.propertyTitle,
+                          style: const TextStyle(fontWeight: FontWeight.w700)),
+                      subtitle: Text(
+                          '${review.reviewer} • ${'★' * review.rating}\n${review.comment}'),
+                      isThreeLine: true,
+                      trailing: review.status == 'Pending'
+                          ? TextButton(
+                              onPressed: () {
+                                repo.resolveReview(review.id, 'Published');
+                                refresh();
+                              },
+                              child: const Text('Publish'))
+                          : const Text('Published'))))
+              .toList()));
+}
+
+class AdminSettings extends StatefulWidget {
+  const AdminSettings({super.key});
+  @override
+  State<AdminSettings> createState() => _AdminSettingsState();
+}
+
+class _AdminSettingsState extends State<AdminSettings> {
+  bool approvals = true;
+  bool reviewAlerts = true;
+  @override
+  Widget build(BuildContext context) => AdminFrame(
+      title: 'Settings',
+      child: Column(children: [
+        SwitchListTile(
+            title: const Text('Require property approval'),
+            subtitle: const Text(
+                'Review owner listings before they appear publicly.'),
+            value: approvals,
+            onChanged: (value) => setState(() => approvals = value)),
+        SwitchListTile(
+            title: const Text('Review alerts'),
+            subtitle:
+                const Text('Notify admins when a new review needs moderation.'),
+            value: reviewAlerts,
+            onChanged: (value) => setState(() => reviewAlerts = value))
+      ]));
+}
+
+class AdminProfile extends StatelessWidget {
+  const AdminProfile({super.key});
+  @override
+  Widget build(BuildContext context) => AdminFrame(
+      title: 'Admin profile',
+      child: Column(children: [
+        const CircleAvatar(
+            radius: 38,
+            backgroundColor: Color(0xffdcebe0),
+            child: Text('P',
+                style: TextStyle(fontSize: 28, color: Color(0xff176b52)))),
+        const SizedBox(height: 12),
+        const Text('Priya Nair',
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+        const Text('priya@illarastay.com',
+            style: TextStyle(color: Colors.black54)),
+        const SizedBox(height: 22),
+        const ListTile(
+            leading: Icon(Icons.admin_panel_settings_outlined),
+            title: Text('Operations administrator'),
+            subtitle: Text('Full moderation access')),
+        ListTile(
+            leading: const Icon(Icons.logout),
+            title: const Text('Log out'),
+            onTap: () =>
+                Navigator.of(context).popUntil((route) => route.isFirst))
+      ]));
+}
+
+class AdminFrame extends StatelessWidget {
+  const AdminFrame({required this.title, required this.child, super.key});
+  final String title;
+  final Widget child;
+  @override
+  Widget build(BuildContext context) => SafeArea(
+          child: CustomScrollView(slivers: [
+        SliverAppBar(
+            pinned: true,
+            title: Row(children: [
+              const Icon(Icons.admin_panel_settings_outlined, size: 20),
+              const SizedBox(width: 8),
+              Text(title, style: const TextStyle(fontWeight: FontWeight.w700))
+            ])),
+        SliverPadding(
+            padding: const EdgeInsets.all(20),
+            sliver: SliverToBoxAdapter(child: child))
+      ]));
 }
 
 class Frame extends StatelessWidget {
@@ -2252,7 +2948,12 @@ class _WizardState extends State<Wizard> {
           content: Text('Complete required fields: ${missing.join(', ')}')));
       return;
     }
-    final property = _preview().copyWith(published: publish);
+    final property = _preview().copyWith(
+        published: publish,
+        approvalStatus: publish
+            ? PropertyApprovalStatus.pending
+            : widget.initial?.approvalStatus ??
+                PropertyApprovalStatus.approved);
     if (widget.initial == null) {
       widget.repo.addProperty(property);
     } else {
