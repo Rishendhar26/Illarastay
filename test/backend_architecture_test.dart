@@ -24,6 +24,32 @@ void main() {
     expect(result.message, contains('required'));
   });
 
+  test('public registration supports owner role but rejects admin role',
+      () async {
+    final repository = MockAuthRepository();
+    final owner = await repository.register(
+        name: 'Owner',
+        email: 'owner@example.com',
+        password: 'password',
+        role: BackendRole.owner);
+    expect(owner.user?.role, BackendRole.owner);
+    final admin = await repository.register(
+        name: 'Admin',
+        email: 'admin@example.com',
+        password: 'password',
+        role: BackendRole.admin);
+    expect(admin.state, BackendSessionState.error);
+    expect(admin.message, contains('provisioned'));
+  });
+
+  test('mock auth restores the current authenticated session', () async {
+    final repository = MockAuthRepository();
+    await repository.login(email: 'demo@example.com', password: 'password');
+    final restored = await repository.restoreSession();
+    expect(restored.state, BackendSessionState.signedIn);
+    expect(restored.user?.id, 'mock-user');
+  });
+
   test('supabase repositories fail safely without credentials', () async {
     final repository = SupabaseAuthRepository(const AppConfig());
     await expectLater(repository.login(email: 'a@b.com', password: 'secret'),
@@ -60,6 +86,7 @@ void main() {
     repository.requestVisit(repository.properties().first,
         message: 'Please share parking details.');
     final request = repository.requests().last;
+    expect(request.tenantId, 'mock-user');
     expect(request.message, contains('parking'));
     repository.updateRequest(request.id, app.RequestStatus.accepted);
     expect(request.status, app.RequestStatus.accepted);

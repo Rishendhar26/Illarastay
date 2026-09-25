@@ -3,6 +3,7 @@ import '../models/backend_models.dart';
 abstract interface class AuthRepository {
   Stream<SessionSnapshot> get sessionStream;
   SessionSnapshot get currentSession;
+  Future<SessionSnapshot> restoreSession();
   Future<SessionSnapshot> register(
       {required String name,
       required String email,

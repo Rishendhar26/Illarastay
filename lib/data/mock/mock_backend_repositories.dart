@@ -17,6 +17,9 @@ class MockAuthRepository implements AuthRepository {
   Stream<SessionSnapshot> get sessionStream => _sessionController;
 
   @override
+  Future<SessionSnapshot> restoreSession() async => _session;
+
+  @override
   Future<SessionSnapshot> login(
       {required String email, required String password}) async {
     if (email.trim().isEmpty || password.isEmpty) {
@@ -41,7 +44,32 @@ class MockAuthRepository implements AuthRepository {
           required String email,
           required String password,
           required BackendRole role}) =>
-      login(email: email, password: password);
+      _register(name: name, email: email, password: password, role: role);
+
+  Future<SessionSnapshot> _register({
+    required String name,
+    required String email,
+    required String password,
+    required BackendRole role,
+  }) async {
+    if (role == BackendRole.admin) {
+      _session = const SessionSnapshot(
+          state: BackendSessionState.error,
+          message: 'Admin accounts are provisioned separately.');
+    } else if (name.trim().isEmpty ||
+        email.trim().isEmpty ||
+        password.isEmpty) {
+      _session = const SessionSnapshot(
+          state: BackendSessionState.error,
+          message: 'Name, email and password are required.');
+    } else {
+      _session = SessionSnapshot(
+          state: BackendSessionState.signedIn,
+          user: AuthUserRecord(
+              id: 'mock-user', email: email, name: name, role: role));
+    }
+    return _session;
+  }
 
   @override
   Future<void> logout() async {

@@ -1,12 +1,27 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import 'core/config/app_config.dart';
+import 'core/models/backend_models.dart' as backend;
+import 'core/services/auth_service.dart';
 import 'core/services/supabase_service.dart';
+import 'data/mock/mock_backend_repositories.dart';
+import 'data/supabase/supabase_repositories.dart';
+
+AuthService? _authService;
+
+AuthService get appAuthService =>
+    _authService ??= AuthService(MockAuthRepository());
 
 Future<void> main() async {
-    WidgetsFlutterBinding.ensureInitialized();
-    await SupabaseService.initialize(AppConfig.fromEnvironment());
-    runApp(const IllaraStayApp());
+  WidgetsFlutterBinding.ensureInitialized();
+  final config = AppConfig.fromEnvironment();
+  await SupabaseService.initialize(config);
+  _authService = AuthService(config.hasSupabase
+      ? SupabaseAuthRepository(config)
+      : MockAuthRepository());
+  runApp(const IllaraStayApp());
 }
 
 enum UserRole { seeker, owner, admin }
@@ -201,18 +216,21 @@ class PropertyRequest {
       this.preferredTime,
       this.message = '',
       this.tenantName = 'Aanya Sharma',
-      this.requestType = 'Visit request'});
+      this.requestType = 'Visit request',
+      this.tenantId = 'mock-user',
+      this.ownerId = 'owner-1'});
   final String id;
   final Property property;
   final DateTime? preferredDate;
   final TimeOfDay? preferredTime;
   final String message;
-  final String tenantName, requestType;
+  final String tenantName, requestType, tenantId, ownerId;
   RequestStatus status;
 }
 
 /// Replace this boundary with Firebase, Supabase, or REST without changing the UI.
 abstract class PropertyRepository {
+  String get currentUserId;
   List<Property> properties();
   List<Property> ownedProperties();
   List<PropertyRequest> requests();
@@ -240,6 +258,12 @@ abstract class AdminRepository {
 }
 
 class MockPropertyRepository implements PropertyRepository, AdminRepository {
+  MockPropertyRepository(
+      {this.currentUserId = 'mock-user', this.userName = 'Demo User'});
+
+  @override
+  final String currentUserId;
+  final String userName;
   final savedIds = <String>{'p2'};
   final visitRequests = <PropertyRequest>[
     PropertyRequest('r1', mockProperties.first,
@@ -330,7 +354,10 @@ class MockPropertyRepository implements PropertyRepository, AdminRepository {
           'r${visitRequests.length + 1}', property,
           preferredDate: preferredDate,
           preferredTime: preferredTime,
-          message: message));
+          message: message,
+          tenantName: userName,
+          tenantId: currentUserId,
+          ownerId: property.ownerId));
   @override
   void updateRequest(String id, RequestStatus status) {
     for (final item in visitRequests) {
@@ -540,6 +567,81 @@ final mockProperties = <Property>[
       color: Color(0xffdce8e1)),
 ];
 
+class SessionGate extends StatefulWidget {
+  const SessionGate({super.key});
+
+  @override
+  State<SessionGate> createState() => _SessionGateState();
+}
+
+class _SessionGateState extends State<SessionGate> {
+  late backend.SessionSnapshot session;
+  StreamSubscription<backend.SessionSnapshot>? subscription;
+
+  @override
+  void initState() {
+    super.initState();
+    session = appAuthService.currentSession;
+    _restoreSession();
+    subscription = appAuthService.sessionStream.listen((value) {
+      if (mounted) setState(() => session = value);
+    });
+  }
+
+  Future<void> _restoreSession() async {
+    try {
+      final restored = await appAuthService.restoreSession();
+      if (mounted) setState(() => session = restored);
+    } catch (_) {
+      // Keep the signed-out/mock state when Supabase is unavailable.
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final user = session.user;
+    if (session.state == backend.BackendSessionState.signedIn && user != null) {
+      return AuthenticatedEntry(session: session);
+    }
+    return const SplashScreen();
+  }
+
+  @override
+  void dispose() {
+    subscription?.cancel();
+    super.dispose();
+  }
+}
+
+Future<void> _logout(BuildContext context) async {
+  try {
+    await appAuthService.logout();
+  } finally {
+    if (context.mounted) {
+      Navigator.of(context).popUntil((route) => route.isFirst);
+    }
+  }
+}
+
+class AuthenticatedEntry extends StatelessWidget {
+  const AuthenticatedEntry({required this.session, super.key});
+  final backend.SessionSnapshot session;
+
+  @override
+  Widget build(BuildContext context) {
+    final user = session.user!;
+    if (user.role == backend.BackendRole.admin) {
+      return AdminShell(repo: MockPropertyRepository(currentUserId: user.id));
+    }
+    return Shell(
+        role: user.role == backend.BackendRole.owner
+            ? UserRole.owner
+            : UserRole.seeker,
+        repo: MockPropertyRepository(
+            currentUserId: user.id, userName: user.name));
+  }
+}
+
 class IllaraStayApp extends StatelessWidget {
   const IllaraStayApp({super.key});
   @override
@@ -550,7 +652,7 @@ class IllaraStayApp extends StatelessWidget {
           useMaterial3: true,
           colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xff176b52)),
           scaffoldBackgroundColor: const Color(0xfff7f8f6)),
-      home: const SplashScreen());
+      home: const SessionGate());
 }
 
 class Brand extends StatelessWidget {
@@ -626,9 +728,31 @@ class LoginScreen extends StatelessWidget {
       title: 'Welcome back',
       subtitle: 'Sign in to continue your property journey.',
       button: 'Sign in',
-      next: () => Navigator.pushReplacement(
-          context, MaterialPageRoute(builder: (_) => const RoleScreen())),
+      onSubmit: (context, name, email, password) =>
+          _completeLogin(context, email, password),
       showAdminEntry: true);
+}
+
+Future<void> _completeLogin(
+    BuildContext context, String email, String password) async {
+  try {
+    final session = await appAuthService.login(email, password);
+    if (!context.mounted) return;
+    if (session.state == backend.BackendSessionState.signedIn) {
+      Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+              builder: (_) => AuthenticatedEntry(session: session)));
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(session.message ?? 'Unable to sign in.')));
+    }
+  } catch (error) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Sign in failed: $error')));
+    }
+  }
 }
 
 class AdminLoginScreen extends StatelessWidget {
@@ -639,10 +763,43 @@ class AdminLoginScreen extends StatelessWidget {
       subtitle: 'Secure access for IllaraStay operations staff.',
       button: 'Sign in as admin',
       showAdminEntry: false,
-      next: () => Navigator.pushReplacement(
+      onSubmit: (context, name, email, password) =>
+          _completeAdminLogin(context, email, password));
+}
+
+Future<void> _completeAdminLogin(
+    BuildContext context, String email, String password) async {
+  try {
+    final auth = SupabaseService.isInitialized
+        ? appAuthService
+        : AuthService(
+            MockAuthRepository(defaultRole: backend.BackendRole.admin));
+    final session = await auth.login(email, password);
+    if (!context.mounted) return;
+    if (session.state == backend.BackendSessionState.signedIn &&
+        session.user?.role == backend.BackendRole.admin) {
+      Navigator.pushReplacement(
           context,
           MaterialPageRoute(
-              builder: (_) => AdminShell(repo: MockPropertyRepository()))));
+              builder: (_) => AuthenticatedEntry(session: session)));
+    } else {
+      await auth.logout();
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('This account does not have admin access.')));
+    }
+  } catch (error) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Admin sign in failed: $error')));
+    }
+  }
+}
+
+class RegistrationDraft {
+  const RegistrationDraft(
+      {required this.name, required this.email, required this.password});
+  final String name, email, password;
 }
 
 class RegisterScreen extends StatelessWidget {
@@ -652,74 +809,129 @@ class RegisterScreen extends StatelessWidget {
       title: 'Create your account',
       subtitle: 'Start with a few details. Complete your profile later.',
       button: 'Continue',
-      next: () => Navigator.pushReplacement(
-          context, MaterialPageRoute(builder: (_) => const RoleScreen())),
+      onSubmit: (context, name, email, password) async {
+        Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+                builder: (_) => RoleScreen(
+                    draft: RegistrationDraft(
+                        name: name, email: email, password: password))));
+      },
       register: true);
 }
 
-class AuthPage extends StatelessWidget {
+class AuthPage extends StatefulWidget {
   const AuthPage(
       {required this.title,
       required this.subtitle,
       required this.button,
-      required this.next,
+      required this.onSubmit,
       this.register = false,
       this.showAdminEntry = false,
       super.key});
   final String title, subtitle, button;
-  final VoidCallback next;
+  final Future<void> Function(
+          BuildContext context, String name, String email, String password)
+      onSubmit;
   final bool register;
   final bool showAdminEntry;
+
+  @override
+  State<AuthPage> createState() => _AuthPageState();
+}
+
+class _AuthPageState extends State<AuthPage> {
+  final nameController = TextEditingController();
+  final emailController = TextEditingController();
+  final passwordController = TextEditingController();
+  bool loading = false;
+
   @override
   Widget build(BuildContext context) => Scaffold(
       appBar:
           AppBar(leading: const BackButton(), title: const Brand(small: true)),
       body: ListView(padding: const EdgeInsets.all(24), children: [
-        Text(title,
+        Text(widget.title,
             style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                 fontWeight: FontWeight.w700, color: const Color(0xff123047))),
         const SizedBox(height: 8),
-        Text(subtitle, style: const TextStyle(color: Colors.black54)),
+        Text(widget.subtitle, style: const TextStyle(color: Colors.black54)),
         const SizedBox(height: 28),
-        if (register)
-          const TextField(
-              decoration: InputDecoration(
+        if (widget.register)
+          TextField(
+              controller: nameController,
+              decoration: const InputDecoration(
                   labelText: 'Full name',
                   prefixIcon: Icon(Icons.person_outline))),
-        if (register) const SizedBox(height: 14),
-        const TextField(
-            decoration: InputDecoration(
+        if (widget.register) const SizedBox(height: 14),
+        TextField(
+            controller: emailController,
+            decoration: const InputDecoration(
                 labelText: 'Email address',
                 prefixIcon: Icon(Icons.mail_outline))),
         const SizedBox(height: 14),
-        const TextField(
+        TextField(
+            controller: passwordController,
             obscureText: true,
-            decoration: InputDecoration(
+            decoration: const InputDecoration(
                 labelText: 'Password', prefixIcon: Icon(Icons.lock_outline))),
         const SizedBox(height: 24),
-        FilledButton(onPressed: next, child: Text(button)),
+        FilledButton(
+            onPressed: loading ? null : _submit,
+            child: loading
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2))
+                : Text(widget.button)),
         const SizedBox(height: 12),
         TextButton(
             onPressed: () => Navigator.push(
                 context,
                 MaterialPageRoute(
-                    builder: (_) => register
+                    builder: (_) => widget.register
                         ? const LoginScreen()
                         : const RegisterScreen())),
-            child: Text(register
+            child: Text(widget.register
                 ? 'Already have an account? Sign in'
                 : 'New to IllaraStay? Create an account')),
-        if (showAdminEntry)
+        if (widget.showAdminEntry)
           TextButton.icon(
               onPressed: () => Navigator.push(context,
                   MaterialPageRoute(builder: (_) => const AdminLoginScreen())),
               icon: const Icon(Icons.admin_panel_settings_outlined),
               label: const Text('Admin portal'))
       ]));
+
+  Future<void> _submit() async {
+    if (emailController.text.trim().isEmpty ||
+        passwordController.text.isEmpty ||
+        (widget.register && nameController.text.trim().isEmpty)) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Please complete all required fields.')));
+      return;
+    }
+    setState(() => loading = true);
+    try {
+      await widget.onSubmit(context, nameController.text.trim(),
+          emailController.text.trim(), passwordController.text);
+    } finally {
+      if (mounted) setState(() => loading = false);
+    }
+  }
+
+  @override
+  void dispose() {
+    nameController.dispose();
+    emailController.dispose();
+    passwordController.dispose();
+    super.dispose();
+  }
 }
 
 class RoleScreen extends StatelessWidget {
-  const RoleScreen({super.key});
+  const RoleScreen({this.draft, super.key});
+  final RegistrationDraft? draft;
   @override
   Widget build(BuildContext context) => Scaffold(
       body: Padding(
@@ -738,21 +950,57 @@ class RoleScreen extends StatelessWidget {
                 icon: Icons.search,
                 title: 'I am looking for a place',
                 text: 'Explore homes, save favourites and request visits.',
-                onTap: () => openApp(context, UserRole.seeker)),
+                onTap: () => _selectRole(context, UserRole.seeker)),
             const SizedBox(height: 12),
             RoleTile(
                 icon: Icons.add_business,
                 title: 'I want to list a property',
                 text: 'Manage listings and connect with prospective tenants.',
-                onTap: () => openApp(context, UserRole.owner)),
+                onTap: () => _selectRole(context, UserRole.owner)),
             const Spacer()
           ])));
+
+  Future<void> _selectRole(BuildContext context, UserRole role) async {
+    if (draft == null) {
+      openApp(context, role);
+      return;
+    }
+    try {
+      final session = await appAuthService.register(
+          draft!.name,
+          draft!.email,
+          draft!.password,
+          role == UserRole.owner
+              ? backend.BackendRole.owner
+              : backend.BackendRole.tenant);
+      if (!context.mounted) return;
+      if (session.state == backend.BackendSessionState.signedIn) {
+        Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+                builder: (_) => AuthenticatedEntry(session: session)));
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(session.message ?? 'Registration failed.')));
+      }
+    } catch (error) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Registration failed: $error')));
+      }
+    }
+  }
 }
 
-void openApp(BuildContext context, UserRole role) => Navigator.pushReplacement(
-    context,
-    MaterialPageRoute(
-        builder: (_) => Shell(role: role, repo: MockPropertyRepository())));
+void openApp(BuildContext context, UserRole role,
+        {String userId = 'mock-user', String userName = 'Demo User'}) =>
+    Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+            builder: (_) => Shell(
+                role: role,
+                repo: MockPropertyRepository(
+                    currentUserId: userId, userName: userName))));
 
 class RoleTile extends StatelessWidget {
   const RoleTile(
@@ -1191,8 +1439,7 @@ class AdminMore extends StatelessWidget {
         ListTile(
             leading: const Icon(Icons.logout),
             title: const Text('Log out'),
-            onTap: () =>
-                Navigator.of(context).popUntil((route) => route.isFirst))
+            onTap: () => _logout(context))
       ]));
 }
 
@@ -1329,8 +1576,7 @@ class AdminProfile extends StatelessWidget {
         ListTile(
             leading: const Icon(Icons.logout),
             title: const Text('Log out'),
-            onTap: () =>
-                Navigator.of(context).popUntil((route) => route.isFirst))
+            onTap: () => _logout(context))
       ]));
 }
 
@@ -2155,8 +2401,7 @@ class _ProfileState extends State<Profile> {
         ListTile(
             leading: const Icon(Icons.logout),
             title: const Text('Log out'),
-            onTap: () =>
-                Navigator.of(context).popUntil((route) => route.isFirst))
+            onTap: () => _logout(context))
       ]));
 
   Future<void> _editProfile() async {
@@ -2907,6 +3152,7 @@ class _WizardState extends State<Wizard> {
       description: descriptionController.text.trim(),
       amenities: selectedAmenities.toList(),
       owner: 'Aanya Sharma',
+      ownerId: widget.repo.currentUserId,
       color: const Color(0xffdcebe0),
       listingType: listingType,
       deposit: double.tryParse(depositController.text) ?? 0,

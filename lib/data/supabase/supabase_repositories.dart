@@ -65,8 +65,12 @@ class SupabaseAuthRepository extends _SupabaseRepository
   Stream<SessionSnapshot> get sessionStream {
     if (!config.hasSupabase) return const Stream.empty();
     return client.auth.onAuthStateChange
-        .map((event) => _snapshot(event.session));
+        .asyncMap((event) => _snapshotWithProfile(event.session));
   }
+
+  @override
+  Future<SessionSnapshot> restoreSession() => _snapshotWithProfile(
+      config.hasSupabase ? client.auth.currentSession : null);
 
   @override
   Future<SessionSnapshot> login(
@@ -79,7 +83,7 @@ class SupabaseAuthRepository extends _SupabaseRepository
     return guarded(() async {
       final response = await client.auth
           .signInWithPassword(email: email.trim(), password: password);
-      return _snapshot(response.session);
+      return _snapshotWithProfile(response.session);
     });
   }
 
@@ -90,13 +94,23 @@ class SupabaseAuthRepository extends _SupabaseRepository
     required String password,
     required BackendRole role,
   }) =>
-      guarded(() async {
-        final response = await client.auth.signUp(
-            email: email.trim(),
-            password: password,
-            data: {'name': name.trim(), 'role': role.name});
-        return _snapshot(response.session);
-      });
+      role == BackendRole.admin
+          ? Future.value(const SessionSnapshot(
+              state: BackendSessionState.error,
+              message: 'Admin accounts are provisioned separately.'))
+          : guarded(() async {
+              final response = await client.auth.signUp(
+                  email: email.trim(),
+                  password: password,
+                  data: {'name': name.trim(), 'role': role.name});
+              if (response.session == null && response.user != null) {
+                return const SessionSnapshot(
+                    state: BackendSessionState.signedOut,
+                    message:
+                        'Account created. Check your email to confirm it, then sign in.');
+              }
+              return _snapshotWithProfile(response.session);
+            });
 
   @override
   Future<void> logout() => guarded(client.auth.signOut);
@@ -124,6 +138,32 @@ class SupabaseAuthRepository extends _SupabaseRepository
                 user.email ??
                 'IllaraStay user',
             role: role));
+  }
+
+  Future<SessionSnapshot> _snapshotWithProfile(Session? session) async {
+    final fallback = _snapshot(session);
+    if (session == null) return fallback;
+    try {
+      final profile = await client
+          .from('users')
+          .select('name, role')
+          .eq('id', session.user.id)
+          .maybeSingle();
+      if (profile == null) return fallback;
+      final role = BackendRole.values
+              .where((value) => value.name == profile['role'])
+              .firstOrNull ??
+          BackendRole.tenant;
+      return SessionSnapshot(
+          state: BackendSessionState.signedIn,
+          user: AuthUserRecord(
+              id: session.user.id,
+              email: session.user.email ?? '',
+              name: profile['name'] as String? ?? fallback.user!.name,
+              role: role));
+    } catch (_) {
+      return fallback;
+    }
   }
 }
 

@@ -10,6 +10,7 @@ class AuthService {
 
   SessionSnapshot get currentSession => repository.currentSession;
   Stream<SessionSnapshot> get sessionStream => repository.sessionStream;
+  Future<SessionSnapshot> restoreSession() => repository.restoreSession();
 
   Future<SessionSnapshot> login(String email, String password) =>
       repository.login(email: email, password: password);
