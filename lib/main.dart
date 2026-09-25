@@ -58,16 +58,88 @@ class Property {
       this.floor = 0,
       this.totalFloors = 0,
       this.availability = 'Available now',
-      this.address = 'Address shared after a visit is requested'});
+      this.address = 'Address shared after a visit is requested',
+      this.latitude = 0,
+      this.longitude = 0,
+      this.availableUnits = 1,
+      this.otherCharges = 0,
+      this.photos = const [],
+      this.published = true,
+      this.ownerId = 'owner-1'});
   final String id, title, city, locality, description, owner;
-  final String availability, address;
+  final String availability, address, ownerId;
   final PropertyType type;
   final ListingType listingType;
   final double price, deposit, maintenance;
+  final double latitude, longitude, otherCharges;
   final int area, bedrooms, bathrooms, floor, totalFloors;
+  final int availableUnits;
   final Furnishing furnishing;
   final List<String> amenities;
+  final List<String> photos;
   final Color color;
+  final bool published;
+
+  Property copyWith({
+    String? id,
+    String? title,
+    PropertyType? type,
+    String? city,
+    String? locality,
+    String? description,
+    String? owner,
+    Color? color,
+    ListingType? listingType,
+    double? price,
+    double? deposit,
+    double? maintenance,
+    double? otherCharges,
+    double? latitude,
+    double? longitude,
+    int? area,
+    int? bedrooms,
+    int? bathrooms,
+    int? floor,
+    int? totalFloors,
+    int? availableUnits,
+    Furnishing? furnishing,
+    List<String>? amenities,
+    List<String>? photos,
+    String? availability,
+    String? address,
+    String? ownerId,
+    bool? published,
+  }) =>
+      Property(
+        id: id ?? this.id,
+        title: title ?? this.title,
+        type: type ?? this.type,
+        city: city ?? this.city,
+        locality: locality ?? this.locality,
+        price: price ?? this.price,
+        area: area ?? this.area,
+        description: description ?? this.description,
+        amenities: amenities ?? this.amenities,
+        owner: owner ?? this.owner,
+        color: color ?? this.color,
+        listingType: listingType ?? this.listingType,
+        bedrooms: bedrooms ?? this.bedrooms,
+        bathrooms: bathrooms ?? this.bathrooms,
+        deposit: deposit ?? this.deposit,
+        maintenance: maintenance ?? this.maintenance,
+        furnishing: furnishing ?? this.furnishing,
+        floor: floor ?? this.floor,
+        totalFloors: totalFloors ?? this.totalFloors,
+        availability: availability ?? this.availability,
+        address: address ?? this.address,
+        latitude: latitude ?? this.latitude,
+        longitude: longitude ?? this.longitude,
+        availableUnits: availableUnits ?? this.availableUnits,
+        otherCharges: otherCharges ?? this.otherCharges,
+        photos: photos ?? this.photos,
+        published: published ?? this.published,
+        ownerId: ownerId ?? this.ownerId,
+      );
 }
 
 class PropertyRequest {
@@ -75,31 +147,54 @@ class PropertyRequest {
       {this.status = RequestStatus.pending,
       this.preferredDate,
       this.preferredTime,
-      this.message = ''});
+      this.message = '',
+      this.tenantName = 'Aanya Sharma',
+      this.requestType = 'Visit request'});
   final String id;
   final Property property;
   final DateTime? preferredDate;
   final TimeOfDay? preferredTime;
   final String message;
+  final String tenantName, requestType;
   RequestStatus status;
 }
 
 /// Replace this boundary with Firebase, Supabase, or REST without changing the UI.
 abstract class PropertyRepository {
   List<Property> properties();
+  List<Property> ownedProperties();
   List<PropertyRequest> requests();
   bool saved(String id);
   void toggleSaved(String id);
   void requestVisit(Property property,
       {DateTime? preferredDate, TimeOfDay? preferredTime, String message = ''});
   void updateRequest(String id, RequestStatus status);
+  void addProperty(Property property);
+  void updateProperty(Property property);
+  void deleteProperty(String id);
+  void setPublished(String id, bool published);
 }
 
 class MockPropertyRepository implements PropertyRepository {
   final savedIds = <String>{'p2'};
-  final visitRequests = <PropertyRequest>[];
+  final visitRequests = <PropertyRequest>[
+    PropertyRequest('r1', mockProperties.first,
+        preferredDate: DateTime(2026, 10, 12),
+        preferredTime: const TimeOfDay(hour: 11, minute: 30),
+        message: 'I would love to see the natural light and parking.',
+        tenantName: 'Aanya Sharma')
+  ];
+  final ownerProperties = <Property>[
+    ...mockProperties.where((p) => p.id == 'p1' || p.id == 'p2' || p.id == 'p6')
+  ];
   @override
-  List<Property> properties() => mockProperties;
+  List<Property> properties() => [
+        ...ownerProperties,
+        ...mockProperties
+            .where((p) => !ownerProperties.any((owned) => owned.id == p.id))
+      ].where((p) => p.published).toList();
+  @override
+  List<Property> ownedProperties() => ownerProperties;
   @override
   List<PropertyRequest> requests() => visitRequests;
   @override
@@ -121,6 +216,28 @@ class MockPropertyRepository implements PropertyRepository {
   void updateRequest(String id, RequestStatus status) {
     for (final item in visitRequests) {
       if (item.id == id) item.status = status;
+    }
+  }
+
+  @override
+  void addProperty(Property property) => ownerProperties.add(property);
+
+  @override
+  void updateProperty(Property property) {
+    final index = ownerProperties.indexWhere((item) => item.id == property.id);
+    if (index >= 0) ownerProperties[index] = property;
+  }
+
+  @override
+  void deleteProperty(String id) =>
+      ownerProperties.removeWhere((item) => item.id == id);
+
+  @override
+  void setPublished(String id, bool published) {
+    final index = ownerProperties.indexWhere((item) => item.id == id);
+    if (index >= 0) {
+      ownerProperties[index] =
+          ownerProperties[index].copyWith(published: published);
     }
   }
 }
@@ -498,8 +615,8 @@ class _ShellState extends State<Shell> {
             const Profile()
           ]
         : [
-            Dashboard(repo: widget.repo),
-            Listings(repo: widget.repo),
+            Dashboard(repo: widget.repo, refresh: refresh),
+            Listings(repo: widget.repo, refresh: refresh),
             OwnerRequests(repo: widget.repo, refresh: refresh),
             const Profile()
           ];
@@ -1387,29 +1504,68 @@ class _ProfileState extends State<Profile> {
 }
 
 class Dashboard extends StatelessWidget {
-  const Dashboard({required this.repo, super.key});
+  const Dashboard({required this.repo, required this.refresh, super.key});
   final PropertyRepository repo;
+  final VoidCallback refresh;
   @override
   Widget build(BuildContext context) => Frame(
       title: 'Owner dashboard',
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const Heading('Welcome, Aanya'),
+        const Heading('Welcome back, Aanya'),
         const SizedBox(height: 6),
-        const Text('Here is how your portfolio is doing.',
+        const Text('Here is how your property portfolio is doing.',
             style: TextStyle(color: Colors.black54)),
         const SizedBox(height: 20),
         Row(children: [
-          Stat(value: '${repo.properties().length}', label: 'Active listings'),
+          Stat(
+              value:
+                  '${repo.ownedProperties().where((p) => p.published).length}',
+              label: 'Active properties'),
           const SizedBox(width: 12),
-          Stat(value: '${repo.requests().length}', label: 'New requests')
+          Stat(
+              value: '${repo.ownedProperties().length}',
+              label: 'Total listings')
+        ]),
+        const SizedBox(height: 12),
+        Row(children: [
+          Stat(
+              value:
+                  '${repo.requests().where((r) => r.status == RequestStatus.pending).length}',
+              label: 'Pending requests'),
+          const SizedBox(width: 12),
+          Stat(
+              value:
+                  '${repo.requests().where((r) => r.status == RequestStatus.accepted).length}',
+              label: 'Upcoming visits')
         ]),
         const SizedBox(height: 26),
         const Heading('Quick actions'),
         const SizedBox(height: 12),
-        FilledButton.icon(
-            onPressed: () {},
-            icon: const Icon(Icons.add_home_work_outlined),
-            label: const Text('Add a property'))
+        Row(children: [
+          Expanded(
+              child: FilledButton.icon(
+                  onPressed: () => Navigator.push(context,
+                          MaterialPageRoute(builder: (_) => Wizard(repo: repo)))
+                      .then((_) => refresh()),
+                  icon: const Icon(Icons.add_home_work_outlined),
+                  label: const Text('Add property'))),
+          const SizedBox(width: 10),
+          Expanded(
+              child: OutlinedButton.icon(
+                  onPressed: () => refresh(),
+                  icon: const Icon(Icons.apartment_outlined),
+                  label: const Text('Manage properties')))
+        ]),
+        const SizedBox(height: 26),
+        const Heading('Recent tenant requests'),
+        const SizedBox(height: 10),
+        if (repo.requests().isEmpty)
+          const Empty(title: 'No recent requests')
+        else
+          ...repo
+              .requests()
+              .take(3)
+              .map((request) => RequestSummary(request: request))
       ]));
 }
 
@@ -1435,22 +1591,154 @@ class Stat extends StatelessWidget {
 }
 
 class Listings extends StatelessWidget {
-  const Listings({required this.repo, super.key});
+  const Listings({required this.repo, required this.refresh, super.key});
   final PropertyRepository repo;
+  final VoidCallback refresh;
   @override
   Widget build(BuildContext context) => Frame(
       title: 'My properties',
       child: Column(children: [
         FilledButton.icon(
-            onPressed: () => Navigator.push(
-                context, MaterialPageRoute(builder: (_) => const Wizard())),
+            onPressed: () => Navigator.push(context,
+                    MaterialPageRoute(builder: (_) => Wizard(repo: repo)))
+                .then((_) => refresh()),
             icon: const Icon(Icons.add),
             label: const Text('Add a property')),
         const SizedBox(height: 16),
-        ...repo
-            .properties()
-            .map((p) => ListingCard(property: p, repo: repo, refresh: () {}))
+        ...repo.ownedProperties().map(
+            (p) => OwnerPropertyCard(property: p, repo: repo, refresh: refresh))
       ]));
+}
+
+class OwnerPropertyCard extends StatelessWidget {
+  const OwnerPropertyCard(
+      {required this.property,
+      required this.repo,
+      required this.refresh,
+      super.key});
+  final Property property;
+  final PropertyRepository repo;
+  final VoidCallback refresh;
+
+  @override
+  Widget build(BuildContext context) => Card(
+      elevation: 0,
+      margin: const EdgeInsets.only(bottom: 14),
+      child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(children: [
+            Row(children: [
+              Container(
+                  width: 72,
+                  height: 72,
+                  decoration: BoxDecoration(
+                      color: property.color,
+                      borderRadius: BorderRadius.circular(12)),
+                  child: const Icon(Icons.home_work_rounded,
+                      color: Color(0xff176b52))),
+              const SizedBox(width: 12),
+              Expanded(
+                  child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                    Text(property.title,
+                        style: const TextStyle(fontWeight: FontWeight.w700)),
+                    const SizedBox(height: 4),
+                    Text('${property.locality}, ${property.city}',
+                        style: const TextStyle(color: Colors.black54)),
+                    const SizedBox(height: 6),
+                    Row(children: [
+                      StatusBadge(
+                          label: property.published ? 'Published' : 'Draft',
+                          positive: property.published),
+                      const SizedBox(width: 8),
+                      Text('₹${property.price.toStringAsFixed(0)}',
+                          style: const TextStyle(fontWeight: FontWeight.w700))
+                    ])
+                  ])),
+              PopupMenuButton<String>(
+                  onSelected: (value) => _action(context, value),
+                  itemBuilder: (_) => [
+                        const PopupMenuItem(
+                            value: 'details', child: Text('View details')),
+                        const PopupMenuItem(
+                            value: 'edit', child: Text('Edit property')),
+                        PopupMenuItem(
+                            value: property.published ? 'unpublish' : 'publish',
+                            child: Text(
+                                property.published ? 'Unpublish' : 'Publish')),
+                        const PopupMenuItem(
+                            value: 'delete', child: Text('Delete'))
+                      ])
+            ])
+          ])));
+
+  void _action(BuildContext context, String action) {
+    switch (action) {
+      case 'details':
+        Navigator.push(
+            context,
+            MaterialPageRoute(
+                builder: (_) =>
+                    Details(property: property, repo: repo, refresh: refresh)));
+      case 'edit':
+        Navigator.push(
+                context,
+                MaterialPageRoute(
+                    builder: (_) => Wizard(repo: repo, initial: property)))
+            .then((_) => refresh());
+      case 'publish':
+        repo.setPublished(property.id, true);
+        refresh();
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('Property published.')));
+      case 'unpublish':
+        repo.setPublished(property.id, false);
+        refresh();
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Property unpublished.')));
+      case 'delete':
+        showDialog<void>(
+            context: context,
+            builder: (_) => AlertDialog(
+                    title: const Text('Delete property?'),
+                    content: const Text(
+                        'This removes the listing from your portfolio.'),
+                    actions: [
+                      TextButton(
+                          onPressed: () => Navigator.pop(context),
+                          child: const Text('Cancel')),
+                      FilledButton(
+                          onPressed: () {
+                            repo.deleteProperty(property.id);
+                            Navigator.pop(context);
+                            refresh();
+                            ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                    content: Text('Property deleted.')));
+                          },
+                          child: const Text('Delete'))
+                    ]));
+    }
+  }
+}
+
+class StatusBadge extends StatelessWidget {
+  const StatusBadge({required this.label, required this.positive, super.key});
+  final String label;
+  final bool positive;
+  @override
+  Widget build(BuildContext context) => Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+          color: positive ? const Color(0xffdcebe0) : const Color(0xfff0e6d8),
+          borderRadius: BorderRadius.circular(20)),
+      child: Text(label,
+          style: TextStyle(
+              fontSize: 12,
+              color:
+                  positive ? const Color(0xff176b52) : const Color(0xff8b5e34),
+              fontWeight: FontWeight.w700)));
 }
 
 class OwnerRequests extends StatelessWidget {
@@ -1465,100 +1753,599 @@ class OwnerRequests extends StatelessWidget {
           : Column(
               children: repo
                   .requests()
-                  .map((r) => Card(
-                      elevation: 0,
-                      child: Column(children: [
-                        ListTile(
-                            title: Text(r.property.title),
-                            subtitle: const Text('Requested by Aanya Sharma')),
-                        if (r.status == RequestStatus.pending)
-                          Row(
-                              mainAxisAlignment: MainAxisAlignment.end,
-                              children: [
-                                TextButton(
-                                    onPressed: () {
-                                      repo.updateRequest(
-                                          r.id, RequestStatus.rejected);
-                                      refresh();
-                                    },
-                                    child: const Text('Decline')),
-                                FilledButton(
-                                    onPressed: () {
-                                      repo.updateRequest(
-                                          r.id, RequestStatus.accepted);
-                                      refresh();
-                                    },
-                                    child: const Text('Accept')),
-                                const SizedBox(width: 12)
-                              ])
-                      ])))
+                  .map((r) => OwnerRequestCard(
+                      request: r, repo: repo, refresh: refresh))
                   .toList()));
 }
 
+class RequestSummary extends StatelessWidget {
+  const RequestSummary({required this.request, super.key});
+  final PropertyRequest request;
+  @override
+  Widget build(BuildContext context) => Card(
+      elevation: 0,
+      child: ListTile(
+          leading: const CircleAvatar(child: Icon(Icons.person_outline)),
+          title: Text(request.tenantName,
+              style: const TextStyle(fontWeight: FontWeight.w700)),
+          subtitle: Text('${request.property.title}\n${request.requestType}'),
+          isThreeLine: true,
+          trailing: StatusBadge(
+              label: request.status.label,
+              positive: request.status == RequestStatus.accepted ||
+                  request.status == RequestStatus.completed)));
+}
+
+class OwnerRequestCard extends StatelessWidget {
+  const OwnerRequestCard(
+      {required this.request,
+      required this.repo,
+      required this.refresh,
+      super.key});
+  final PropertyRequest request;
+  final PropertyRepository repo;
+  final VoidCallback refresh;
+
+  @override
+  Widget build(BuildContext context) => Card(
+      elevation: 0,
+      margin: const EdgeInsets.only(bottom: 14),
+      child: Padding(
+          padding: const EdgeInsets.all(14),
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              const CircleAvatar(child: Icon(Icons.person_outline)),
+              const SizedBox(width: 10),
+              Expanded(
+                  child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                    Text(request.tenantName,
+                        style: const TextStyle(fontWeight: FontWeight.w700)),
+                    Text(request.requestType,
+                        style: const TextStyle(color: Colors.black54))
+                  ])),
+              StatusBadge(
+                  label: request.status.label,
+                  positive: request.status == RequestStatus.accepted ||
+                      request.status == RequestStatus.completed)
+            ]),
+            const Divider(height: 24),
+            Text(request.property.title,
+                style: const TextStyle(fontWeight: FontWeight.w700)),
+            const SizedBox(height: 8),
+            Text(request.preferredDate == null
+                ? 'Preferred visit: To be scheduled'
+                : 'Preferred visit: ${request.preferredDate!.day}/${request.preferredDate!.month}/${request.preferredDate!.year} at ${request.preferredTime?.format(context) ?? 'any time'}'),
+            if (request.message.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text('"${request.message}"',
+                  style: const TextStyle(color: Colors.black54))
+            ],
+            if (request.status != RequestStatus.completed) ...[
+              const SizedBox(height: 12),
+              Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+                if (request.status == RequestStatus.pending) ...[
+                  TextButton(
+                      onPressed: () {
+                        repo.updateRequest(request.id, RequestStatus.rejected);
+                        refresh();
+                      },
+                      child: const Text('Reject')),
+                  const SizedBox(width: 8),
+                  FilledButton(
+                      onPressed: () {
+                        repo.updateRequest(request.id, RequestStatus.accepted);
+                        refresh();
+                      },
+                      child: const Text('Accept'))
+                ] else if (request.status == RequestStatus.accepted)
+                  FilledButton.icon(
+                      onPressed: () {
+                        repo.updateRequest(request.id, RequestStatus.completed);
+                        refresh();
+                      },
+                      icon: const Icon(Icons.check),
+                      label: const Text('Mark completed'))
+              ])
+            ]
+          ])));
+}
+
 class Wizard extends StatefulWidget {
-  const Wizard({super.key});
+  const Wizard({required this.repo, this.initial, super.key});
+  final PropertyRepository repo;
+  final Property? initial;
   @override
   State<Wizard> createState() => _WizardState();
 }
 
 class _WizardState extends State<Wizard> {
   int step = 0;
+  late PropertyType type;
+  late ListingType listingType;
+  late Furnishing furnishing;
+  late final titleController =
+      TextEditingController(text: widget.initial?.title ?? '');
+  late final descriptionController =
+      TextEditingController(text: widget.initial?.description ?? '');
+  late final bedroomsController =
+      TextEditingController(text: _number(widget.initial?.bedrooms));
+  late final bathroomsController =
+      TextEditingController(text: _number(widget.initial?.bathrooms));
+  late final areaController =
+      TextEditingController(text: _number(widget.initial?.area));
+  late final floorController =
+      TextEditingController(text: _number(widget.initial?.floor));
+  late final totalFloorsController =
+      TextEditingController(text: _number(widget.initial?.totalFloors));
+  late final priceController =
+      TextEditingController(text: _decimal(widget.initial?.price));
+  late final depositController =
+      TextEditingController(text: _decimal(widget.initial?.deposit));
+  late final maintenanceController =
+      TextEditingController(text: _decimal(widget.initial?.maintenance));
+  late final otherChargesController =
+      TextEditingController(text: _decimal(widget.initial?.otherCharges));
+  late final cityController =
+      TextEditingController(text: widget.initial?.city ?? '');
+  late final localityController =
+      TextEditingController(text: widget.initial?.locality ?? '');
+  late final addressController =
+      TextEditingController(text: widget.initial?.address ?? '');
+  late final latitudeController =
+      TextEditingController(text: _decimal(widget.initial?.latitude));
+  late final longitudeController =
+      TextEditingController(text: _decimal(widget.initial?.longitude));
+  late final unitsController =
+      TextEditingController(text: _number(widget.initial?.availableUnits ?? 1));
+  DateTime? availabilityDate;
+  late final selectedAmenities = <String>{...?widget.initial?.amenities};
+  late final photos = <String>[...?widget.initial?.photos];
+  final allAmenities = const [
+    'Wi-Fi',
+    'Parking',
+    'AC',
+    'Power backup',
+    'Lift',
+    'Security',
+    'CCTV',
+    'Water supply',
+    'Washing machine',
+    'Kitchen',
+    'Furnished',
+    'Gym',
+    'Swimming pool'
+  ];
+  final titles = const [
+    'Property type',
+    'Basic details',
+    'Pricing',
+    'Amenities',
+    'Photos',
+    'Location',
+    'Availability',
+    'Preview'
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    type = widget.initial?.type ?? PropertyType.flat;
+    listingType = widget.initial?.listingType ?? ListingType.rent;
+    furnishing = widget.initial?.furnishing ?? Furnishing.semiFurnished;
+    if (widget.initial?.availability.startsWith('Available from ') == true) {
+      availabilityDate =
+          DateTime.tryParse(widget.initial!.availability.substring(15));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final titles = [
-      'Basic information',
-      'Location and price',
-      'Ready to publish?'
-    ];
     return Scaffold(
-        appBar: AppBar(title: Text('Add property ${step + 1}/3')),
-        body: Padding(
-            padding: const EdgeInsets.all(24),
-            child:
-                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(titles[step],
-                  style: const TextStyle(
-                      fontSize: 23, fontWeight: FontWeight.w700)),
-              const SizedBox(height: 24),
-              if (step == 0)
-                const TextField(
-                    decoration: InputDecoration(labelText: 'Property title')),
-              if (step == 0)
-                const Padding(
-                    padding: EdgeInsets.only(top: 14),
-                    child: DropdownMenu<String>(
-                        label: Text('Property type'),
-                        dropdownMenuEntries: [
-                          DropdownMenuEntry(value: 'Flat', label: 'Flat'),
-                          DropdownMenuEntry(value: 'Room', label: 'Room'),
-                          DropdownMenuEntry(value: 'Villa', label: 'Villa')
-                        ])),
-              if (step == 1)
-                const TextField(
-                    decoration:
-                        InputDecoration(labelText: 'City and locality')),
-              if (step == 1)
-                const Padding(
-                    padding: EdgeInsets.only(top: 14),
-                    child: TextField(
-                        decoration: InputDecoration(
-                            labelText: 'Expected price', prefixText: '₹ '))),
-              if (step == 2)
-                const Text('You can edit details any time after publishing.',
-                    style: TextStyle(color: Colors.black54)),
-              const Spacer(),
-              Row(children: [
-                if (step > 0)
-                  OutlinedButton(
-                      onPressed: () => setState(() => step--),
-                      child: const Text('Back')),
-                const Spacer(),
-                FilledButton(
-                    onPressed: () => step < 2
-                        ? setState(() => step++)
-                        : Navigator.pop(context),
-                    child: Text(step == 2 ? 'Publish listing' : 'Continue'))
-              ])
-            ])));
+        appBar: AppBar(
+            title: Text(
+                '${widget.initial == null ? 'Add property' : 'Edit property'} ${step + 1}/8')),
+        body: Column(children: [
+          LinearProgressIndicator(value: (step + 1) / titles.length),
+          Expanded(
+              child: ListView(padding: const EdgeInsets.all(20), children: [
+            Text(titles[step],
+                style:
+                    const TextStyle(fontSize: 23, fontWeight: FontWeight.w700)),
+            const SizedBox(height: 6),
+            Text('Step ${step + 1} of ${titles.length}',
+                style: const TextStyle(color: Colors.black54)),
+            const SizedBox(height: 22),
+            _stepContent(),
+            const SizedBox(height: 100)
+          ]))
+        ]),
+        bottomNavigationBar: SafeArea(
+            child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
+                child: Row(children: [
+                  if (step > 0)
+                    OutlinedButton(
+                        onPressed: () => setState(() => step--),
+                        child: const Text('Back')),
+                  const Spacer(),
+                  if (step == 7) ...[
+                    OutlinedButton(
+                        onPressed: () => _save(false),
+                        child: const Text('Save draft')),
+                    const SizedBox(width: 8),
+                    FilledButton(
+                        onPressed: () => _save(true),
+                        child: const Text('Publish property'))
+                  ] else
+                    FilledButton(
+                        onPressed: _next, child: const Text('Continue'))
+                ]))));
   }
+
+  Widget _stepContent() => switch (step) {
+        0 => _typeStep(),
+        1 => _detailsStep(),
+        2 => _pricingStep(),
+        3 => _amenitiesStep(),
+        4 => _photosStep(),
+        5 => _locationStep(),
+        6 => _availabilityStep(),
+        _ => PreviewProperty(property: _preview())
+      };
+
+  Widget _typeStep() =>
+      Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('What are you listing?',
+            style: TextStyle(color: Colors.black54)),
+        const SizedBox(height: 14),
+        ...PropertyType.values.map((value) => Card(
+            elevation: 0,
+            child: ListTile(
+                leading: Icon(
+                    type == value
+                        ? Icons.radio_button_checked
+                        : Icons.radio_button_off,
+                    color: const Color(0xff176b52)),
+                title: Text(value.label),
+                onTap: () => setState(() => type = value))))
+      ]);
+
+  Widget _detailsStep() => Column(children: [
+        _field(titleController, 'Property title', required: true),
+        _field(descriptionController, 'Description',
+            maxLines: 4, required: true),
+        Row(children: [
+          Expanded(child: _field(bedroomsController, 'Bedrooms', number: true)),
+          const SizedBox(width: 12),
+          Expanded(
+              child: _field(bathroomsController, 'Bathrooms', number: true))
+        ]),
+        Row(children: [
+          Expanded(
+              child: _field(areaController, 'Area (sq ft)',
+                  number: true, required: true)),
+          const SizedBox(width: 12),
+          Expanded(child: _field(floorController, 'Floor', number: true))
+        ]),
+        _field(totalFloorsController, 'Total floors', number: true),
+        DropdownButtonFormField<Furnishing>(
+            initialValue: furnishing,
+            decoration: const InputDecoration(labelText: 'Furnishing'),
+            items: Furnishing.values
+                .map((value) =>
+                    DropdownMenuItem(value: value, child: Text(value.label)))
+                .toList(),
+            onChanged: (value) {
+              if (value != null) setState(() => furnishing = value);
+            })
+      ]);
+
+  Widget _pricingStep() => Column(children: [
+        SegmentedButton<ListingType>(
+            segments: const [
+              ButtonSegment(
+                  value: ListingType.rent,
+                  label: Text('Rent'),
+                  icon: Icon(Icons.key_outlined)),
+              ButtonSegment(
+                  value: ListingType.sale,
+                  label: Text('Sale'),
+                  icon: Icon(Icons.sell_outlined))
+            ],
+            selected: {
+              listingType
+            },
+            onSelectionChanged: (value) =>
+                setState(() => listingType = value.first)),
+        const SizedBox(height: 18),
+        _field(priceController,
+            listingType == ListingType.rent ? 'Monthly rent' : 'Sale price',
+            number: true, required: true, prefix: '₹ '),
+        _field(depositController, 'Security deposit',
+            number: true, prefix: '₹ '),
+        _field(maintenanceController, 'Monthly maintenance',
+            number: true, prefix: '₹ '),
+        _field(otherChargesController, 'Other charges',
+            number: true, prefix: '₹ ')
+      ]);
+
+  Widget _amenitiesStep() =>
+      Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('Choose everything your property offers.',
+            style: TextStyle(color: Colors.black54)),
+        const SizedBox(height: 14),
+        Wrap(
+            spacing: 8,
+            runSpacing: 4,
+            children: allAmenities
+                .map((amenity) => FilterChip(
+                    label: Text(amenity),
+                    selected: selectedAmenities.contains(amenity),
+                    onSelected: (selected) => setState(() => selected
+                        ? selectedAmenities.add(amenity)
+                        : selectedAmenities.remove(amenity))))
+                .toList())
+      ]);
+
+  Widget _photosStep() =>
+      Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        const Text('Add photos to help tenants understand the space.',
+            style: TextStyle(color: Colors.black54)),
+        const SizedBox(height: 16),
+        Wrap(spacing: 12, runSpacing: 12, children: [
+          ...photos.asMap().entries.map((entry) => Stack(children: [
+                Container(
+                    width: 100,
+                    height: 100,
+                    decoration: BoxDecoration(
+                        color: const Color(0xffdcebe0),
+                        borderRadius: BorderRadius.circular(12)),
+                    child: const Icon(Icons.home_work_rounded,
+                        size: 38, color: Color(0xff176b52))),
+                Positioned(
+                    right: 0,
+                    top: 0,
+                    child: IconButton(
+                        onPressed: () =>
+                            setState(() => photos.removeAt(entry.key)),
+                        icon: const Icon(Icons.cancel, color: Colors.white)))
+              ])),
+          InkWell(
+              onTap: () =>
+                  setState(() => photos.add('mock-photo-${photos.length + 1}')),
+              child: Container(
+                  width: 100,
+                  height: 100,
+                  decoration: BoxDecoration(
+                      border: Border.all(color: const Color(0xff176b52)),
+                      borderRadius: BorderRadius.circular(12)),
+                  child: const Icon(Icons.add_a_photo_outlined,
+                      color: Color(0xff176b52))))
+        ]),
+        const SizedBox(height: 16),
+        const Text(
+            'Mock gallery placeholders are ready to be replaced by cloud storage uploads.',
+            style: TextStyle(color: Colors.black54))
+      ]);
+
+  Widget _locationStep() => Column(children: [
+        _field(cityController, 'City', required: true),
+        _field(localityController, 'Locality', required: true),
+        _field(addressController, 'Full address', maxLines: 3, required: true),
+        Row(children: [
+          Expanded(child: _field(latitudeController, 'Latitude', number: true)),
+          const SizedBox(width: 12),
+          Expanded(
+              child: _field(longitudeController, 'Longitude', number: true))
+        ])
+      ]);
+
+  Widget _availabilityStep() =>
+      Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        ListTile(
+            leading: const Icon(Icons.today_outlined),
+            title: Text(availabilityDate == null
+                ? 'Available now'
+                : 'Available from ${availabilityDate!.day}/${availabilityDate!.month}/${availabilityDate!.year}'),
+            subtitle: const Text('Tap to choose a date'),
+            onTap: () async {
+              final value = await showDatePicker(
+                  context: context,
+                  firstDate: DateTime.now(),
+                  lastDate: DateTime.now().add(const Duration(days: 730)),
+                  initialDate: availabilityDate ?? DateTime.now());
+              if (value != null) setState(() => availabilityDate = value);
+            }),
+        if (availabilityDate != null)
+          TextButton.icon(
+              onPressed: () => setState(() => availabilityDate = null),
+              icon: const Icon(Icons.clear),
+              label: const Text('Mark available now')),
+        _field(unitsController, 'Available rooms / units',
+            number: true, required: true)
+      ]);
+
+  TextField _field(TextEditingController controller, String label,
+          {bool number = false,
+          bool required = false,
+          int maxLines = 1,
+          String? prefix}) =>
+      TextField(
+          controller: controller,
+          maxLines: maxLines,
+          keyboardType: number ? TextInputType.number : TextInputType.text,
+          decoration: InputDecoration(
+              labelText: required ? '$label *' : label, prefixText: prefix));
+
+  void _next() {
+    if (step < titles.length - 1) setState(() => step++);
+  }
+
+  Property _preview() => Property(
+      id: widget.initial?.id ??
+          'draft-${DateTime.now().millisecondsSinceEpoch}',
+      title: titleController.text.trim().isEmpty
+          ? 'Untitled property'
+          : titleController.text.trim(),
+      type: type,
+      city: cityController.text.trim().isEmpty
+          ? 'City'
+          : cityController.text.trim(),
+      locality: localityController.text.trim().isEmpty
+          ? 'Locality'
+          : localityController.text.trim(),
+      price: double.tryParse(priceController.text) ?? 0,
+      area: int.tryParse(areaController.text) ?? 0,
+      bedrooms: int.tryParse(bedroomsController.text) ?? 0,
+      bathrooms: int.tryParse(bathroomsController.text) ?? 0,
+      description: descriptionController.text.trim(),
+      amenities: selectedAmenities.toList(),
+      owner: 'Aanya Sharma',
+      color: const Color(0xffdcebe0),
+      listingType: listingType,
+      deposit: double.tryParse(depositController.text) ?? 0,
+      maintenance: double.tryParse(maintenanceController.text) ?? 0,
+      otherCharges: double.tryParse(otherChargesController.text) ?? 0,
+      furnishing: furnishing,
+      floor: int.tryParse(floorController.text) ?? 0,
+      totalFloors: int.tryParse(totalFloorsController.text) ?? 0,
+      availability: availabilityDate == null
+          ? 'Available now'
+          : 'Available from ${availabilityDate!.year}-${availabilityDate!.month.toString().padLeft(2, '0')}-${availabilityDate!.day.toString().padLeft(2, '0')}',
+      address: addressController.text.trim(),
+      latitude: double.tryParse(latitudeController.text) ?? 0,
+      longitude: double.tryParse(longitudeController.text) ?? 0,
+      availableUnits: int.tryParse(unitsController.text) ?? 1,
+      photos: photos,
+      published: false);
+
+  void _save(bool publish) {
+    final missing = <String>[];
+    if (titleController.text.trim().isEmpty) {
+      missing.add('title');
+    }
+    if (descriptionController.text.trim().isEmpty) {
+      missing.add('description');
+    }
+    if (cityController.text.trim().isEmpty) {
+      missing.add('city');
+    }
+    if (localityController.text.trim().isEmpty) {
+      missing.add('locality');
+    }
+    if (addressController.text.trim().isEmpty) {
+      missing.add('address');
+    }
+    if (double.tryParse(priceController.text) == null ||
+        double.parse(priceController.text) <= 0) {
+      missing.add('price');
+    }
+    if (int.tryParse(areaController.text) == null ||
+        int.parse(areaController.text) <= 0) {
+      missing.add('area');
+    }
+    if (missing.isNotEmpty && publish) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Complete required fields: ${missing.join(', ')}')));
+      return;
+    }
+    final property = _preview().copyWith(published: publish);
+    if (widget.initial == null) {
+      widget.repo.addProperty(property);
+    } else {
+      widget.repo.updateProperty(property);
+    }
+    Navigator.pop(context);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(publish ? 'Property published.' : 'Draft saved.')));
+  }
+
+  String _number(int? value) => value == null || value == 0 ? '' : '$value';
+  String _decimal(double? value) =>
+      value == null || value == 0 ? '' : value.toString();
+
+  @override
+  void dispose() {
+    for (final controller in [
+      titleController,
+      descriptionController,
+      bedroomsController,
+      bathroomsController,
+      areaController,
+      floorController,
+      totalFloorsController,
+      priceController,
+      depositController,
+      maintenanceController,
+      otherChargesController,
+      cityController,
+      localityController,
+      addressController,
+      latitudeController,
+      longitudeController,
+      unitsController
+    ]) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
+}
+
+class PreviewProperty extends StatelessWidget {
+  const PreviewProperty({required this.property, super.key});
+  final Property property;
+
+  @override
+  Widget build(BuildContext context) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Tenant preview', style: TextStyle(color: Colors.black54)),
+          const SizedBox(height: 12),
+          Card(
+              elevation: 0,
+              clipBehavior: Clip.antiAlias,
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                        height: 150,
+                        width: double.infinity,
+                        color: property.color,
+                        child: const Icon(Icons.home_work_rounded,
+                            size: 64, color: Color(0xff176b52))),
+                    Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(property.title,
+                                  style: const TextStyle(
+                                      fontSize: 19,
+                                      fontWeight: FontWeight.w700)),
+                              Text('${property.locality}, ${property.city}',
+                                  style:
+                                      const TextStyle(color: Colors.black54)),
+                              const SizedBox(height: 10),
+                              Text(
+                                  '₹${property.price.toStringAsFixed(0)}${property.listingType == ListingType.rent ? ' / month' : ''}',
+                                  style: const TextStyle(
+                                      fontSize: 20,
+                                      fontWeight: FontWeight.w800,
+                                      color: Color(0xff176b52))),
+                              const SizedBox(height: 10),
+                              Text(property.description),
+                              const SizedBox(height: 10),
+                              Wrap(
+                                  spacing: 8,
+                                  children: property.amenities
+                                      .map((amenity) =>
+                                          Chip(label: Text(amenity)))
+                                      .toList())
+                            ]))
+                  ]))
+        ],
+      );
 }
