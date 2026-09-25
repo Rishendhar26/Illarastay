@@ -28,7 +28,7 @@ lib/
 	main.dart       Existing tenant, owner, and admin UI
 ```
 
-`MockPropertyRepository` remains the app's current demo implementation. `MockAuthRepository` and `MockStorageService` provide deterministic local behavior for the new contracts. Supabase implementations fail clearly when configuration is absent instead of silently exposing partial behavior.
+`MockPropertyRepository` remains the app's current demo implementation. `MockAuthRepository` and `MockStorageService` provide deterministic local behavior for the new contracts. When build-time Supabase configuration is present, `SupabaseService` initializes `supabase_flutter` and the Supabase auth/property repositories are available; otherwise the app stays in safe mock mode.
 
 ## Backend architecture
 
@@ -38,15 +38,15 @@ Marketplace visibility is intentionally modeled as two independent states: a pro
 
 ## Supabase configuration
 
-Copy [`.env.example`](.env.example) to `.env` for local reference. Do not commit `.env`, real credentials, passwords, or service-role keys. Flutter can receive the public values at build/run time without storing them in source:
+Copy [`.env.example`](.env.example) to `.env` for local reference. Do not commit `.env`, real credentials, passwords, or service-role keys. Flutter receives the project URL and publishable key at build/run time without storing the key in source:
 
 ```bash
 flutter run \
-	--dart-define=SUPABASE_URL=https://your-project.supabase.co \
-	--dart-define=SUPABASE_ANON_KEY=your-public-anon-key
+	--dart-define=SUPABASE_URL=https://fmuhpybmqicsovmetvao.supabase.co \
+	--dart-define=SUPABASE_PUBLISHABLE_KEY=your-public-publishable-key
 ```
 
-The app reads these values through `AppConfig.fromEnvironment()`. A real Supabase SDK integration should be added behind the interfaces in `lib/core/repositories/` and `lib/data/supabase/`; credentials are never required for the mock demo.
+The app reads these values through `AppConfig.fromEnvironment()`. The current project URL is used as the safe default URL; provide `SUPABASE_URL` explicitly when targeting another project. The publishable key is always expected through `SUPABASE_PUBLISHABLE_KEY` and is never committed.
 
 ## Validation
 
@@ -58,4 +58,4 @@ flutter build web --release
 
 ## Current limitations
 
-The backend and storage integrations are intentionally placeholders until deployment configuration is supplied. Mock data is local and is reset on app restart. Payments, KYC, subscriptions, advanced chat, agreements, and AI recommendations are not implemented.
+The storage contract is ready for Supabase Storage but the upload implementation is still pending deployment configuration. Mock data is local and is reset on app restart. Payments, KYC, subscriptions, advanced chat, agreements, and AI recommendations are not implemented.

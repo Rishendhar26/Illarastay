@@ -35,6 +35,11 @@ void main() {
     expect(
         const AppConfig(supabaseUrl: 'url', supabaseAnonKey: 'key').hasSupabase,
         isTrue);
+    expect(
+        const AppConfig(
+                supabaseUrl: 'url', supabasePublishableKey: 'publishable-key')
+            .hasSupabase,
+        isTrue);
   });
   test('demo repository exposes only approved published marketplace properties',
       () {

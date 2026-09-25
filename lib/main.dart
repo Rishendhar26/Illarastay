@@ -1,6 +1,13 @@
 import 'package:flutter/material.dart';
 
-void main() => runApp(const IllaraStayApp());
+import 'core/config/app_config.dart';
+import 'core/services/supabase_service.dart';
+
+Future<void> main() async {
+    WidgetsFlutterBinding.ensureInitialized();
+    await SupabaseService.initialize(AppConfig.fromEnvironment());
+    runApp(const IllaraStayApp());
+}
 
 enum UserRole { seeker, owner, admin }
 
